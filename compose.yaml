@@ -1,0 +1,39 @@
+services:
+  lighthouse:
+    build:
+      context: .
+      args:
+        VERSION: ${VERSION:-dev}
+    command: ["run"]
+
+    # dnclient creates and configures a tun device, which needs CAP_NET_ADMIN and
+    # /dev/net/tun. An added capability is not in an unprivileged user's effective
+    # set, so the daemon runs as root (overriding the image's `app` user) with the
+    # capability set scoped to NET_ADMIN rather than --privileged.
+    user: "0:0"
+    cap_add:
+      - NET_ADMIN
+    devices:
+      - /dev/net/tun
+
+    environment:
+      # Secrets and IDs are read from the host environment — no values live here.
+      DN_API_KEY: ${DN_API_KEY:?set DN_API_KEY in your environment}
+      DN_NETWORK_ID: ${DN_NETWORK_ID:?set DN_NETWORK_ID}
+      DN_ROLE_ID: ${DN_ROLE_ID:?set DN_ROLE_ID (must be a lighthouse-capable role)}
+      DN_NETWORK_NAME: ${DN_NETWORK_NAME:-defined}
+      DN_IS_LIGHTHOUSE: "true"
+      DN_LISTEN_PORT: ${DN_LISTEN_PORT:-4242}
+      # A lighthouse must advertise >=1 public IP:port peers use to reach it, as a
+      # JSON array. It has no default — set it to your public address.
+      DN_STATIC_ADDRESSES: ${DN_STATIC_ADDRESSES:?set to your public address, e.g. '["203.0.113.10:4242"]'}
+      DN_HOSTNAME: ${DN_HOSTNAME}
+
+    ports:
+      - "${DN_LISTEN_PORT:-4242}:${DN_LISTEN_PORT:-4242}/udp"
+
+    # On stop, `dn-tool run` unenrolls under run's 10s default deadline; the grace
+    # period must exceed it so the remote DELETE finishes before SIGKILL, the
+    # binary-side counterpart to the module's TimeoutStopSec rule (design §2.5/D5).
+    stop_grace_period: 30s
+    restart: "no"

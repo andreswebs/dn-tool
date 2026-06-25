@@ -1,0 +1,30 @@
+# golangci-lint v2 configuration — the lint stage of the dn-tool quality gate
+# (see docs/agents/build-and-validation.md). Keep this green: every later task
+# must pass `make validate`.
+#
+# Error-handling convention (enforced at review, per build-and-validation.md):
+# never use `_ =` to silence an error you ought to handle. errcheck keeps every
+# unchecked error visible — handle it (return, log, or assert in a test). The
+# only sanctioned ignores are the idioms errcheck already permits via an
+# explicit blank assignment: a deferred Close and Write in httptest handlers.
+version: "2"
+
+linters:
+  # `standard` enables errcheck, govet, ineffassign, staticcheck, and unused —
+  # bug and unchecked-error coverage. We add revive for style/convention checks
+  # (exported-symbol docs, naming, error-string form). Deliberately not "all":
+  # the extra linters trade signal for noise on a control-plane CLI this size.
+  default: standard
+  enable:
+    - revive
+  exclusions:
+    rules:
+      # api.APIError / api.APIErrorItem "stutter" by revive's heuristic, but the
+      # names are deliberate: enroll's orphan check recovers the typed error via
+      # errors.As(err, &apiErr) and branches on apiErr.Has(code, path) (see
+      # docs/learnings.md). Renaming is the api package's call, not the lint
+      # gate's — allow the stutter here while keeping the rule live elsewhere.
+      - path: internal/api/
+        linters:
+          - revive
+        text: stutters

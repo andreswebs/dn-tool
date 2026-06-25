@@ -1,0 +1,35 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: build & validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Go version is taken from src/go.mod so CI tracks the module's declared
+      # toolchain instead of a hardcoded value that can drift.
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: src/go.mod
+          cache-dependency-path: src/go.sum
+
+      # `make lint` shells out to golangci-lint, so it must be on PATH and pinned
+      # to the version developers run locally (see src/.golangci.yml, a v2 config).
+      - name: Install golangci-lint
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/v2.12.2/install.sh \
+            | sh -s -- -b "$(go env GOPATH)/bin" v2.12.2
+          echo "$(go env GOPATH)/bin" >> "$GITHUB_PATH"
+
+      # The full quality gate: fmt-check, vet, lint, test, then compile.
+      - name: Build & validate
+        run: make build

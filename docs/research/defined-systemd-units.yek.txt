@@ -1,0 +1,267 @@
+>>>> units/dnclient@.service
+[Unit]
+Description=Defined Networking nebula client
+ConditionFileIsExecutable=${BIN_DIR}/dnclient
+After=network-online.target dnclient-install.service
+Wants=network-online.target
+
+[Service]
+Type=notify
+NotifyAccess=main
+
+ExecStart=${BIN_DIR}/dnclient run -server https://api.defined.net -name "%i"
+
+Restart=always
+StartLimitInterval=5
+StartLimitBurst=10
+RestartSec=120
+
+[Install]
+WantedBy=multi-user.target
+
+>>>> units/dnctl.service
+[Unit]
+Description=Enroll and unenroll a host in Defined.net
+ConditionFileIsExecutable=${BIN_DIR}/dnctl
+After=network-online.target dnclient.service
+Wants=network-online.target dnclient.service
+
+[Service]
+EnvironmentFile=/etc/defined/dnctl
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=${BIN_DIR}/dnctl enroll
+ExecReload=${BIN_DIR}/dnctl reenroll
+ExecStop=${BIN_DIR}/dnctl unenroll
+
+[Install]
+WantedBy=multi-user.target
+
+>>>> README.md
+# defined-systemd-units
+
+This is a small collection of systemd units and supporting scripts to help you install and enroll [dnclient](https://docs.defined.net/glossary/dnclient/) into a [defined.net](https://defined.net/) account on a server that uses systemd.
+
+## Requirements
+
+* A free [defined.net](https://admin.defined.net/signup) account
+* A configured [overlay network](https://docs.defined.net/guides/getting-started/)
+* [Bash 4.2+](https://www.gnu.org/software/bash/)
+* [systemd](https://systemd.io/)
+* [envsubst](https://www.gnu.org/software/gettext/manual/html_node/envsubst-Invocation.html)
+* [jq](https://stedolan.github.io/jq/)
+* [curl](https://curl.se/)
+* The need for more overlay networking in your life so you can show off to your friends
+
+## Install
+
+1. Clone (or download) this repository `git clone https://github.com/quickvm/defined-systemd-units.git`
+1. `cd defined-systemd-units`
+1. `sudo ./install`
+
+If you want to customize the install you can export the following environment variables:
+
+```bash
+export UNIT_FILES=/full/path/to/defined-systemd-units/units
+export UNIT_DIR=/usr/lib/systemd/system
+export BIN_FILES=/full/path/to/defined-systemd-units/bin
+export BIN_DIR=/usr/bin
+export DN_VERSION=0.3.2
+```
+
+Note: The `dnclient.service` unit that this repository provides expects `dnclient` to support systemd type=notify. The current `v0.2.2-beta3` version of `dnclient` has this support, so the `install` script overrides the version to `v0.2.2-beta3`. Setting `DN_VERSION` to a lower version might not work as expected. You can also change `Type=notify` in `units/dnclient.service` to `Type=simple` and use an older version if you wish.
+
+Note: The `install` script uses `envsubst` to template the systemd units in the `units` directory. If you copy them directly they will not work! Please make your changes as you see fit.
+
+## Configuration
+
+You will need to collect a few bits of information from [defined.net](https://admin.defined.net/). You will need:
+
+1. An [API key](https://docs.defined.net/guides/automating-host-creation/#creating-an-api-key) with the following scopes:
+    * hosts:create
+    * hosts:delete
+    * hosts:enroll
+1. A Network ID. Your `networkID`. It can be found in the top left section of the menu in the admin panel.
+1. A [Role](https://docs.defined.net/guides/creating-firewalls-using-roles/#creating-roles) ID
+
+Once you have the above information you will want to save these as key value pairs in `/etc/defined/dnctl`.
+
+```bash
+DN_API_KEY=dnkey-AEMEIG2EITHATEI8WEEL1UBEE2-EI3WUOVEEN3AHV9OV1OHROO8ZEI3GESHIE2ICH3JI4FIQUOH5FUO # Required. The API key used to enroll the host.
+DN_NETWORK_ID=network-MAI8WU2YAHN5THEESOOKEE7NAH # Required. The network that the host will enroll into.
+DN_ROLE_ID=role-AICHING2OHGHEI9QUEIZOO7EIZ # Required. The role that the host will enroll into.
+DN_SKIP_UNENROLL=true # Optional. If set to true the host will never unenroll. Defaults to false.
+DN_UNENROLL_ON_REBOOT=false # Optional. If set to true the host will unenroll on reboot. Defaults to false.
+DN_IP_ADDRESS=100.100.0.10 # Optional. If set to an IP in your defined.net network CIDR range it will enroll the host with that IP address.
+DN_HOSTNAME="my-custom-name" # Optional. Base display name in defined.net admin. Defaults to hostname.
+DN_TAGS='["http:allow","foo:bar"]' # Optional. JSON formatted array of tags to add to a host. Defaults to []
+DN_NETWORK_NAME=defined # Optional. Network name for instantiated services. Defaults to "defined".
+```
+
+### Shutdown vs Reboot Behavior
+
+By default, dnctl differentiates between a system shutdown and a reboot:
+
+| Scenario | Default Behavior |
+|----------|------------------|
+| System shutdown (poweroff) | Host is unenrolled |
+| System reboot | Host stays enrolled |
+| `DN_SKIP_UNENROLL=true` | Host never unenrolls |
+| `DN_UNENROLL_ON_REBOOT=true` | Host unenrolls on reboot too |
+
+This is useful for auto-scaling groups (ASG) where terminated instances should be unenrolled, but hosts rebooting for updates should remain enrolled.
+
+During unenrollment, dnctl performs a full cleanup:
+1. Deletes the host from defined.net via API
+2. Stops the `dnclient@<network>.service`
+3. Removes the config directory (`/etc/defined/<network>/`)
+4. Restarts the `dnclient@<network>.service`
+
+This ensures the host is fully cleared from defined.net's system.
+
+Note: `DN_SKIP_UNENROLL=true` should only be used on hosts that you want to stay enrolled over a long period of time. If you set `DN_SKIP_UNENROLL` on servers that are ephemeral in nature you will end up with a bunch of enrolled hosts that you will manually have to clean up at some point. Set `DN_SKIP_UNENROLL=true` with care!
+
+### Cloud Provider Support
+
+When running on AWS, GCP, or Azure, you can use `DN_CLOUD_PROVIDER` to automatically append the instance ID to the hostname. This is useful for auto-scaling groups or other environments where you need unique hostnames.
+
+```bash
+DN_CLOUD_PROVIDER=aws # Supported values: aws, gcp, azure
+DN_HOSTNAME=webserver # Optional base hostname
+```
+
+When `DN_CLOUD_PROVIDER` is set, dnctl will query the cloud provider's metadata service to fetch the instance ID and append it to the hostname:
+
+| Provider | Metadata Source | Example Hostname |
+|----------|-----------------|------------------|
+| `aws` | EC2 IMDSv2 instance-id (strips `i-` prefix) | `webserver-093adcbbbee1cbbb1` |
+| `gcp` | Compute Engine instance ID | `webserver-1234567890123456789` |
+| `azure` | IMDS vmId (first UUID segment) | `webserver-a1b2c3d4` |
+
+### Lighthouse and Relay Enrollment
+
+To enroll a host as a [lighthouse](https://docs.defined.net/glossary/lighthouse/) or relay, add the following variables to `/etc/defined/dnctl`:
+
+```bash
+# Lighthouse enrollment
+DN_IS_LIGHTHOUSE=true # Set to "true" to enroll as a lighthouse. Cannot be used with DN_IS_RELAY.
+DN_STATIC_ADDRESSES='["84.123.10.1:4242"]' # Required for lighthouses. JSON array of public IP:port addresses.
+DN_LISTEN_PORT=4242 # Required non-zero value for lighthouses and relays.
+
+# Relay enrollment
+DN_IS_RELAY=true # Set to "true" to enroll as a relay. Cannot be used with DN_IS_LIGHTHOUSE.
+DN_LISTEN_PORT=4242 # Required non-zero value for lighthouses and relays.
+```
+
+Note: A host cannot be both a lighthouse and a relay. Lighthouses require at least one static address and a non-zero listen port. Relays require a non-zero listen port.
+
+Optionally you can export them to your shell environment as the `root` user:
+
+```bash
+export DN_API_KEY=dnkey-AEMEIG2EITHATEI8WEEL1UBEE2-EI3WUOVEEN3AHV9OV1OHROO8ZEI3GESHIE2ICH3JI4FIQUOH5FUO
+export DN_NETWORK_ID=network-MAI8WU2YAHN5THEESOOKEE7NAH
+export DN_ROLE_ID=role-AICHING2OHGHEI9QUEIZOO7EIZ
+```
+
+and then as the `root` user run `dnctl write_config` or use `sudo -E` and it will create `/etc/defined/dnctl` for you.
+
+This is useful if you are enrolling an ephemeral environment such as a GitHub Action. Check out our GitHub Action [action-dnclient](https://github.com/quickvm/action-dnclient) which can be used to join your Defined.net overlay network. Think deployments on internal infra or accessing internal resources from your GitHub Action runs.
+
+Note: If you export the above to your shell environment you need to `sudo su -` to the `root` user first or use `sudo -E` to pass the current environment through sudo. If you run `sudo -E dnctl write_config` as a non root user, the exported `DN_` variables might not work. When in doubt, `sudo su -` to the `root` user, export your `DN_` vars and run `dnctl write_config`.
+
+## Enable and start `dnclient.service` and `dnctl.service`
+
+You should be ready to enable and start `dnclient.service`. You can either do this via `dnctl`:
+
+1. `dnctl enable`
+1. `dnctl start`
+
+or via `systemctl`:
+
+1. `systemctl enable dnclient.service dnctl.service`
+1. `systemctl start dnclient.service`
+
+Note: You only need to start `dnclient.service` since it has a systemd.unit `Wants=dnctl.service` directive it will cause `dnctl.service` to start afterwards. This dependency will cause dnctl.service to stop if dnclient.service stops. If `DN_SKIP_UNENROLL=true` is set, this will prevent the host from being unenrolled by `dnctl.service` when it stops.
+
+Once the units are enabled and started you can check out <https://admin.defined.net/hosts> and you should see your host enrolled automatically! Tada!
+
+## License
+
+MIT License
+
+Copyright (c) 2024 QuickVM
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and associated documentation files (the "Software"), to deal in the Software without restriction, including without limitation the rights to use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+>>>> install
+#!/usr/bin/env bash
+# SPDX-License-Identifier: MIT
+#
+# Copyright (c) 2023 QuickVM, LLC <contact@quickvm.com> All Rights Reserved.
+
+set -e
+
+OS_ARCH=$(arch)
+OS_TYPE=$(uname)
+
+[[ "${OS_TYPE}" == "Linux" ]] || { echo "Only Linux is supported!"; exit 1; }
+[[ "${UID}" == 0 ]] || { echo "Please run this as root!"; exit 1; }
+
+case "${OS_ARCH}" in
+  aarch64) ARCH="arm64" ;;
+  armv5*) ARCH="armv5" ;;
+  armv6*) ARCH="armv6" ;;
+  armv7*) ARCH="armv7" ;;
+  i386) ARCH="386" ;;
+  i686) ARCH="386" ;;
+  x86_64) ARCH="amd64" ;;
+  x86) ARCH="386" ;;
+  *) ARCH="unknown" ;;
+esac
+
+[[ "${ARCH}" != "unknown" ]] || { echo "Unknown CPU arch!"; exit 1; }
+
+export OSARCH="$(echo ${OS_TYPE}|sed -e 's/Linux/linux/g')-${ARCH}"
+
+: ${UNIT_FILES:=./units}
+: ${UNIT_DIR:=/etc/systemd/system}
+: ${BIN_FILES:=./bin}
+: ${BIN_DIR:=/usr/local/bin}
+: ${DEFINEDPATH:=/etc/defined} # Cuztomize this at your own risk. dnclient expects it's config to be in /etc/defined!
+: ${DN_VERSION:="latest"}
+
+DN_DOWNLOAD_URL=$(curl -sL https://api.defined.net/v1/downloads | jq --arg osarch "${OSARCH}" --arg version "${DN_VERSION}" -r '.data.dnclient|.[ $version ]|.[ $osarch ]')
+
+mkdir -p "${DEFINEDPATH}"
+
+[[ -d ${DEFINEDPATH} ]] || { echo "The ${DEFINEDPATH} directory does not exist! Please create it!"; exit 1; }
+[[ -d ${UNIT_FILES} ]] || { echo "The ${UNIT_FILES} directory cannot be found! Please run this from the repo root directory!"; exit 1; }
+[[ -d ${BIN_FILES} ]] || { echo "The ${BIN_FILES} directory cannot be found! Please run this from the repo root directory!"; exit 1; }
+
+# Download and install dnclient
+if [[ -f ${BIN_DIR}/dnclient ]]; then
+    echo ""
+    echo "${BIN_DIR}/dnclient is already installed!"
+    echo "Stop dnclient and remove ${BIN_DIR}/dnclient to reinstall."
+    echo "Skipping dnclient download and install..."
+  else
+    curl -sSL ${DN_DOWNLOAD_URL} -o ${BIN_DIR}/dnclient && chmod +x ${BIN_DIR}/dnclient
+  fi
+
+# Install systemd service units
+export BIN_DIR=${BIN_DIR}
+install -m 0644 <(envsubst < ${UNIT_FILES}/dnclient@.service) ${UNIT_DIR}/dnclient@.service
+install -m 0644 <(envsubst < ${UNIT_FILES}/dnctl.service) ${UNIT_DIR}/dnctl.service
+
+# Install dnctl
+install -m 0750 ${BIN_FILES}/dnctl ${BIN_DIR}/dnctl
+
+systemctl daemon-reload
+
+echo ""
+echo "Great job, the Defined.net systemd units and dnctl are now installed! Create /etc/defined/dnctl and run dnctl enable and dnctl start!"
+echo ""
