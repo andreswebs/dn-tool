@@ -4,7 +4,7 @@ go 1.26.0
 
 require (
 	github.com/hashicorp/go-retryablehttp v0.7.8
-	github.com/urfave/cli/v3 v3.9.0
+	github.com/urfave/cli/v3 v3.10.1
 	gopkg.in/yaml.v3 v3.0.1
 )
 
