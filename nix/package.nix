@@ -1,6 +1,5 @@
-# The dn-tool package, shared by the flake's packages.default and the overlay.
-# version is injected by the flake (git describe); the overlay leaves it "dev".
 {
+  lib,
   buildGoModule,
   version ? "dev",
 }:
@@ -9,14 +8,11 @@ buildGoModule {
   pname = "dn-tool";
   inherit version;
 
-  # The Go module lives under src/, not the repo root.
   src = ../src;
   vendorHash = "sha256-3E79DpWwCqn+oKM0Y3TkV0Hx1AhwQmXIPuUoTQQQvHU=";
 
   env.CGO_ENABLED = 0;
 
-  # Mirror the Makefile ldflags so `dn-tool --version` reports the stamped
-  # version rather than the "dev" build-info fallback.
   ldflags = [
     "-s"
     "-w"
@@ -26,12 +22,22 @@ buildGoModule {
   meta = {
     description = "Control-plane CLI for defined.net Managed Nebula host enrollment";
     homepage = "https://github.com/andreswebs/dn-tool";
+    license = lib.licenses.unlicense;
+    maintainers = [
+      {
+        name = "Andre Silva";
+        github = "andreswebs";
+        githubId = 30079182;
+      }
+    ];
+
     mainProgram = "dn-tool";
     platforms = [
       "x86_64-linux"
       "aarch64-linux"
-      "x86_64-darwin"
-      "aarch64-darwin"
+      ## The dn-tool itself builds on darwin, but the proprietary daemon from defined.net doesn't support it
+      # "x86_64-darwin"
+      # "aarch64-darwin"
     ];
   };
 }

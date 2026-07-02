@@ -1,8 +1,3 @@
-# NixOS module: services.dnclient — enroll/unenroll a host in a defined.net
-# Managed Nebula network using dn-tool (control plane) and the proprietary
-# dnclient daemon (data plane). Three concrete units plus a poweroff-only
-# unenroll unit. See the dn-tool design doc §2.7 for the rationale, including the
-# bug fixes (B1/B2/D5/SEC4) this layout carries over from the upstream units.
 {
   config,
   lib,
