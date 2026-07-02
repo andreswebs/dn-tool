@@ -1,6 +1,7 @@
 .DS_Store
 .envrc
 bin/
+dist/
 result
 *.bak
 *.bak.*

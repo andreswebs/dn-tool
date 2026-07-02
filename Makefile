@@ -63,7 +63,7 @@ dist: build-all | $(DIST_DIR) ## Package cross-platform archives into dist/
 	  fi; \
 	  rm -rf "$$stage"; \
 	done; \
-	cd $(DIST_DIR) && shasum -a 256 *.tar.gz *.zip > SHA256SUMS.txt
+	cd $(DIST_DIR) && shasum -a 256 $$(ls *.tar.gz *.zip 2>/dev/null) > SHA256SUMS.txt
 
 run: ## Run locally with build flags
 	cd $(SRC_DIR) && go run $(BUILDFLAGS) -ldflags="$(LDFLAGS)" $(CMD_DIR)
