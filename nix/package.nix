@@ -11,7 +11,7 @@ buildGoModule {
 
   # The Go module lives under src/, not the repo root.
   src = ../src;
-  vendorHash = "sha256-UfXdjvYdNXPFTm7CPqkIg6NrF9NWt+ffwRgIuyaegHQ=";
+  vendorHash = "sha256-3E79DpWwCqn+oKM0Y3TkV0Hx1AhwQmXIPuUoTQQQvHU=";
 
   env.CGO_ENABLED = 0;
 
