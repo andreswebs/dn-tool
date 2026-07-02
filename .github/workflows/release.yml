@@ -40,8 +40,14 @@ jobs:
       - name: Install cosign
         uses: sigstore/cosign-installer@6f9f17788090df1f26f669e9d70d6ae9567deba6 # v4.1.2
 
+      # SYFT_SOURCE_* names the SBOM's root package explicitly; without them Syft
+      # derives it from the scanned directory path (see the "no explicit name and
+      # version" warning) instead of the released software's identity.
       - name: Generate SBOM
         uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        env:
+          SYFT_SOURCE_NAME: dn-tool
+          SYFT_SOURCE_VERSION: ${{ github.ref_name }}
         with:
           path: src
           format: spdx-json
