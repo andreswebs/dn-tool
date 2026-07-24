@@ -1,5 +1,5 @@
 APP_NAME    := dn-tool
-SRC_DIR     := $(CURDIR)/src
+SRC_DIR     := $(CURDIR)
 BIN_DIR     := $(CURDIR)/bin
 DIST_DIR    := $(CURDIR)/dist
 CMD_DIR     := ./cmd/dn-tool

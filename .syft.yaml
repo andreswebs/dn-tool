@@ -1,0 +1,7 @@
+exclude:
+  - ./dist
+  - ./bin
+  - ./docs
+  - ./nix
+  - ./.github
+  - ./result

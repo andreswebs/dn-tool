@@ -52,7 +52,7 @@ Two configurability facts that the harnesses exploit or work around:
 | Local config        | `<root>/<network>/dnclient.yml` with a `host_id:` field                                                                           |
 | stdout              | exactly one JSON `Result` per command (`install`/`enroll`/`unenroll`/`write-config`); `run` emits none                            |
 | stderr              | structured slog (JSON, or text with `--log-text`); secrets redacted to `REDACTED`                                                 |
-| Exit codes          | `0` success · `1` failure · `2` `--assert-changed` no-op · `3` unknown command (urfave) · `run` propagates the daemon's exit code |
+| Exit codes          | Per [ADR 0001](adr/0001-exit-code-taxonomy.md): `0` success · `1` `--assert-changed` no-op (a result) · `64` usage/unknown command · `65` data (API 4xx, checksum) · `69` API unreachable (transport/5xx) · `70` unclassified · `74` local I/O · `78` config · `run` also exits `130`/`143` on SIGINT/SIGTERM and passes through the daemon's exit code |
 
 ---
 
@@ -92,11 +92,11 @@ of bug that left `run` as `notImplemented`). It is fast and hermetic.
 - **Discovery:** `--version` prints the stamped version; `--help` lists exactly
   the five commands; each `<cmd> --help` works; `--force` appears only on
   `enroll`.
-- **Unknown command** → exit `3`, usage on stderr.
+- **Unknown command** → exit `64`, usage on stderr.
 - **Missing required config:** `unenroll` with no `DN_API_KEY` → clear
-  `DN_API_KEY is required` error, exit `1`, nothing written to `/etc/defined`.
-  `enroll` with no `DN_API_KEY`/`DN_NETWORK_ID`/`DN_ROLE_ID` → error naming the
-  missing parameter.
+  `DN_API_KEY is required` error, exit `78` (config class), nothing written to
+  `/etc/defined`. `enroll` with no `DN_API_KEY`/`DN_NETWORK_ID`/`DN_ROLE_ID` →
+  error naming the missing parameter, exit `78`.
 - **`write-config`** (fully offline): writes the target file at mode `0600`
   (assert `stat` perms, mask-independent), and the file round-trips back through
   `--env-file` to the same config. Confirms SEC2.
@@ -109,7 +109,8 @@ of bug that left `run` as `notImplemented`). It is fast and hermetic.
   plain text while stdout stays JSON.
 - **`--assert-changed`:** a no-op command (e.g. `write-config` is always a
   change; use `install` idempotent skip on Linux, or an `enroll` already-enrolled
-  no-op on Linux) exits `2`; a real change exits `0`; a failure still exits `1`.
+  no-op on Linux) exits `1` (a result); a real change exits `0`; a failure exits
+  in the sysexits range (`64`-`78`), never `1`.
 - **Secret redaction:** with `DN_LOG_LEVEL=debug`, no stderr line contains the
   `DN_API_KEY` value; it appears only as `REDACTED`.
 
@@ -120,8 +121,8 @@ built binary. Drive the binary, capture stdout/stderr/exit code, assert with
 ```sh
 BIN="bin/dn-tool-$(go env GOOS)-$(go env GOARCH)"
 
-# missing key → clear error, exit 1
-env -i "$BIN" unenroll; test $? -eq 1
+# missing key → clear error, exit 78 (config class)
+env -i "$BIN" unenroll; test $? -eq 78
 
 # write-config is 0600 and round-trips
 tmp="$(mktemp -d)"
@@ -202,9 +203,9 @@ including the real download→checksum→atomic-place, the real exec, and the re
 **What it covers / concrete cases.**
 
 - **install:** fresh install places an executable at `${DN_CLIENT_BIN_DIR}/dnclient`,
-  `Result.changed=true`; re-run is an idempotent skip (`changed=false`, exit `2`
+  `Result.changed=true`; re-run is an idempotent skip (`changed=false`, exit `1`
   under `--assert-changed`); a deliberately wrong served `.sha256` → fail-closed,
-  no binary placed, exit `1`.
+  no binary placed, exit `65` (data class: checksum mismatch).
 - **enroll (state machine, end to end):** absent/absent → create + code + exec
   fake enroll → `dnclient.yml` written, `changed=true`; re-run with local config
   present → no-op `changed=false`; orphan (remote present, local absent) → fail
@@ -213,11 +214,13 @@ including the real download→checksum→atomic-place, the real exec, and the re
   logs.
 - **unenroll:** with `dnclient.yml` present → `DELETE /v1/hosts/host-fake-123`
   then local dir removed, `changed=true`; API `403` → local config **retained**,
-  exit `1` (the §2.5 invariant); already-absent `404` → treated as success.
+  exit `65` (data class, a 4xx rejection; the §2.5 invariant still holds);
+  already-absent `404` → treated as success.
 - **run (lifecycle):** `install → enroll → fake daemon foreground`; send
   `SIGTERM` → fake daemon exits 0, then `unenroll` runs (real DELETE), process
-  exits `0`; make the fake daemon `exit 7` → `dn-tool` exits `7` (daemon
-  exit-code propagation).
+  exits `143` (`128 + SIGTERM`, the graceful-shutdown signal code); make the fake
+  daemon `exit 7` with no signal → `dn-tool` exits `7` (daemon exit-code
+  propagation, the registry exception).
 
 **Harness options.**
 

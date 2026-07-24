@@ -175,14 +175,18 @@ unenrollment work cleanly under a container's process model.
   finding: enrollment fails if the daemon is not active first).
 - IF the daemon exits or its control socket does not appear before a bounded
   deadline, THEN the system shall fail without enrolling and stop the daemon.
-- WHILE the daemon is running, WHEN the process receives a termination signal,
-  the system shall unenroll the host and then exit.
+- WHILE the daemon is running, WHEN the process receives a termination signal
+  (SIGINT/SIGTERM), the system shall unenroll the host and then exit `128` plus
+  the signal number (`130` for SIGINT, `143` for SIGTERM), per
+  [ADR 0001](adr/0001-exit-code-taxonomy.md). This signal code overrides the
+  cleanup outcome: a clean container stop is reported as the signal code, not as
+  a failure, and an unenroll failure during that shutdown is logged (the host
+  may remain enrolled) but does not change the signal exit code.
 - WHEN the daemon terminates on its own, the system shall propagate its
-  termination outcome (exit code) to its own exit status.
-- WHEN the daemon is stopped as part of a signal-initiated shutdown, the system
-  shall treat its signal-kill as expected: a shutdown whose unenroll succeeds
-  exits 0, and only an unenroll failure (the host may remain enrolled) yields a
-  non-zero status. A clean container stop is not reported as a failure.
+  termination outcome (exit code) to its own exit status — the one documented
+  registry exception to the taxonomy (Requirement 8). A daemon death with no
+  clean exit status (a signal kill outside a shutdown, or a non-exec failure)
+  maps to `70`.
 
 #### 6. Configuration interface
 
@@ -224,12 +228,24 @@ pipelines can consume results and logs without scraping prose.
 **User Story**: As an automation author, I want meaningful exit codes, so that
 scripts can branch on success, failure, and no-op without parsing output.
 
-**Acceptance Criteria**:
+**Acceptance Criteria**: exit codes follow the family-wide taxonomy in
+[ADR 0001](adr/0001-exit-code-taxonomy.md), and the per-command sets are
+declared as data (`internal/output/exitcodes.go`) with a conformance test.
 
-- WHEN a command succeeds, the system shall exit with status zero.
-- IF a command fails, THEN the system shall exit with a non-zero error status.
+- WHEN a command succeeds, the system shall exit `0`.
 - WHERE change-assertion is requested and a command makes no change, the system
-  shall exit with a distinct non-error, non-zero status.
+  shall exit `1` (a recoverable result, not a failure).
+- IF a command fails, THEN the system shall exit in the sysexits failure range
+  and classify the failure: `64` usage errors (unknown command, bad flags or
+  arguments); `65` data errors (a rejected API request with HTTP 4xx, a dnclient
+  checksum mismatch); `69` a dependency being unreachable (API transport error
+  or HTTP 5xx); `74` local input/output failures (file reads/writes, the binary
+  download, a subprocess that cannot start); `78` configuration errors
+  (missing/invalid `DN_*` variables, env-file problems, an unsupported
+  platform/arch); and `70` for anything unclassified.
+- WHILE running the daemon, the `run` command additionally exits `130`/`143`
+  after a graceful shutdown on SIGINT/SIGTERM, and otherwise passes through the
+  daemon's own exit status (see Requirement 5).
 
 #### 9. Management API resilience
 

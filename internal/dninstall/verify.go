@@ -1,0 +1,89 @@
+package dninstall
+
+import (
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"fmt"
+	"io"
+	"net/http"
+	"strings"
+
+	"github.com/andreswebs/dn-tool/internal/output"
+)
+
+// downloadAndVerify downloads the dnclient binary described by r and verifies it
+// against the published sibling checksum (r.ChecksumURL, the <URL>.sha256 of
+// API reference §6.3). Verification is mandatory and fail-closed: it fetches the
+// expected digest first, so a checksum that cannot be fetched fails before the
+// binary is ever downloaded, and a digest computed over the actual binary stream
+// that does not match the published value returns an error. On any error the
+// caller must not install whatever was written to dest.
+//
+// The binary is streamed into dest while its SHA-256 is computed, so the whole
+// binary is never buffered in memory. Pass the resilient HTTP client
+// (api.Client's StandardClient) so transient binary fetch failures are retried.
+func downloadAndVerify(ctx context.Context, httpClient *http.Client, r resolved, dest io.Writer) error {
+	expected, err := fetchChecksum(ctx, httpClient, r.ChecksumURL)
+	if err != nil {
+		return err
+	}
+
+	// Fetching and streaming the binary are network/local I/O (EX_IOERR, ADR
+	// 0001); the checksum mismatch below is a data-integrity failure (EX_DATAERR).
+	resp, err := get(ctx, httpClient, r.URL)
+	if err != nil {
+		return output.Classify(fmt.Errorf("downloading dnclient binary: %w", err), output.CodeIO)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return output.Classify(fmt.Errorf("downloading dnclient binary %s: unexpected status %d", r.URL, resp.StatusCode), output.CodeIO)
+	}
+
+	hasher := sha256.New()
+	if _, err := io.Copy(dest, io.TeeReader(resp.Body, hasher)); err != nil {
+		return output.Classify(fmt.Errorf("streaming dnclient binary: %w", err), output.CodeIO)
+	}
+
+	actual := hex.EncodeToString(hasher.Sum(nil))
+	if actual != expected {
+		return output.Classify(fmt.Errorf("dnclient checksum mismatch: published %s, computed %s", expected, actual), output.CodeData)
+	}
+	return nil
+}
+
+// fetchChecksum retrieves and validates the published SHA-256 digest from url.
+// The body is a single lowercase 64-char hex digest (§6.3); surrounding
+// whitespace is tolerated. Any fetch, read, or format failure is an error so the
+// caller never proceeds to download an unverifiable binary.
+func fetchChecksum(ctx context.Context, httpClient *http.Client, url string) (string, error) {
+	resp, err := get(ctx, httpClient, url)
+	if err != nil {
+		return "", output.Classify(fmt.Errorf("fetching dnclient checksum: %w", err), output.CodeIO)
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		return "", output.Classify(fmt.Errorf("fetching dnclient checksum %s: unexpected status %d", url, resp.StatusCode), output.CodeIO)
+	}
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", output.Classify(fmt.Errorf("reading dnclient checksum: %w", err), output.CodeIO)
+	}
+
+	// A checksum whose body is not a 64-char hex digest is malformed published
+	// data (EX_DATAERR), distinct from an I/O failure fetching it.
+	digest := strings.ToLower(strings.TrimSpace(string(body)))
+	if _, err := hex.DecodeString(digest); err != nil || len(digest) != sha256.Size*2 {
+		return "", output.Classify(fmt.Errorf("malformed dnclient checksum %q from %s", digest, url), output.CodeData)
+	}
+	return digest, nil
+}
+
+func get(ctx context.Context, httpClient *http.Client, url string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	return httpClient.Do(req)
+}

@@ -273,7 +273,7 @@ forward. Newest first.
   verify-and-close" pattern.** The 5 children (dt-brug/pe29/xcac/a772/j2ab) built
   and exhaustively tested the internal `enroll.Enroll` state machine, but no child
   owned `main.go` wiring — `enroll` was still `Action: notImplemented`. dt-i0yx
-  _is_ the enroll command, so the integration is its remaining work. Same
+  *is* the enroll command, so the integration is its remaining work. Same
   re-read-acceptance-against-reality check that confirms some epics are done
   ([[dt-8h9t]]/[[dt-cq78]]) exposes the missing seam here. `cmd/dn-tool/enroll.go`
   mirrors `unenroll.go` exactly: thin `enrollAction` (loadConfig → `runEnroll`)
@@ -294,7 +294,7 @@ forward. Newest first.
   "dnclient" at the command layer, exposed `BinaryPath` and refactored
   `install.go` to call it too — install-writes and enroll-execs can never drift.
 - **Testing the create path needs a real executable, not a mock.** The command
-  builds the _production_ exec client, so the create-cell command test writes a
+  builds the *production* exec client, so the create-cell command test writes a
   fake `dnclient` shell script to a temp bin dir (`#!/bin/sh … >> argLog; exit 0`)
   and asserts the logged args are `enroll -name testnet -code SECRET-CODE` —
   proving the bin-path→exec→`-name`/`-code` wiring end-to-end. The internal
@@ -343,7 +343,7 @@ forward. Newest first.
 ## Enroll create cell — list-then-match before create, abort-before-subprocess is the B4 fix (dt-pe29, 2026-06-06)
 
 - **The B4 orphan fix is an ordering invariant, not a cleanup step: every
-  management-API error returns _before_ `deps.DNClient.Enroll` is reached.** The
+  management-API error returns *before* `deps.DNClient.Enroll` is reached.** The
   create cell runs ListHosts → (name match) → CreateHostAndEnrollmentCode →
   `dnclient enroll`, and a failure at either API step short-circuits with the
   subprocess untouched. So the only way a remote record exists without a started
@@ -356,7 +356,7 @@ forward. Newest first.
   is unknown on a list error, so proceeding to create risks a duplicate (or, with
   the API's own duplicate-name 400, a confusing failure). Treat unknown as "stop"
   — `fmt.Errorf("listing hosts …: %w", err)`. The happy path's "no match → create"
-  only fires on a _successful_ empty/non-matching list.
+  only fires on a *successful* empty/non-matching list.
 - **Wrap API errors with `%w`, return the subprocess error bare.** Behavior 3
   asserts `errors.As(err, &*api.APIError)` so the create/list wraps use `%w` to
   keep the chain crossable; behavior 4 asserts `errors.Is(err, enrollErr)` on the
@@ -374,7 +374,7 @@ forward. Newest first.
   `errLocalAbsentUnimplemented` accordingly.
 - **The code is `Reveal()`d at exactly one new site** — the `dnclient enroll`
   hand-off — matching the [[dt-toaj]] single-greppable-accessor rule. Behavior 5's
-  test asserts the revealed code reaches the mock's `gotCode` _and_ never appears
+  test asserts the revealed code reaches the mock's `gotCode` *and* never appears
   in the `output.Result` fields; the never-logged guarantee itself lives in the
   [[dt-a772]] exec shim (logs only action+bin, never args).
 
@@ -392,7 +392,7 @@ networkName, code string)` — the `-name` is not optional flavor, it is the
   (network name is a per-call arg, not constructor state) — the client is a thin
   exec shim, not a config holder.
 - **`Run(ctx, args...)` prepends the `run` subcommand**; the caller (dt-flal)
-  passes only `-server <url> -name <network>`. The method name _is_ the subcommand,
+  passes only `-server <url> -name <network>`. The method name *is* the subcommand,
   so prepending it (vs. making the caller repeat "run") keeps the seam honest.
 - **Behavior 4 (never log the code) is satisfied by structure, not scrubbing:**
   the exec shim logs only `action`+`bin` at debug — never the arg list — so the
@@ -402,11 +402,11 @@ networkName, code string)` — the `-name` is not optional flavor, it is the
   code that'd be its leak, but our wiring adds none. Test pins both the success and
   failure paths against a slog buffer + the error string.
 - **The ctx-cancellation test must `exec sleep 30`, not bare `sleep 30`.** A bare
-  `sleep` is a _grandchild_ of the test process (sh → sleep); `CommandContext`
+  `sleep` is a *grandchild* of the test process (sh → sleep); `CommandContext`
   SIGKILLs only the direct `sh`, orphaning `sleep`, which keeps the inherited
   stderr fd (the go-test output pipe) open — so `go test` blocks on EOF for the
-  full 30s _even though the test asserts <5s and passes_ (the package run jumps
-  30s, the test itself 0.05s). `exec sleep` makes sh _replace_ itself, so there's
+  full 30s *even though the test asserts <5s and passes* (the package run jumps
+  30s, the test itself 0.05s). `exec sleep` makes sh *replace* itself, so there's
   one direct child to kill — and that also models the real case (dnclient is the
   single direct child). If a kill-on-cancel test passes but the package wall-clock
   balloons, look for an orphaned grandchild holding a std fd.
@@ -440,8 +440,8 @@ runtime.GOARCH)` and passes the resolved `Platform` into `Install` via deps.
   client at the command layer (the retryable constructor is unexported in `api`).
 - **Atomic placement = temp-in-target-dir → verify → fsync → chmod → rename, with
   a deferred `os.Remove(tmpPath)`.** `placeBinary` writes the download to
-  `os.CreateTemp(binDir, "dnclient.tmp-*")`, and only a _fully verified, fsynced,
-  closed, +x_ temp is `os.Rename`d onto the final path — so the final path only
+  `os.CreateTemp(binDir, "dnclient.tmp-*")`, and only a *fully verified, fsynced,
+  closed, +x* temp is `os.Rename`d onto the final path — so the final path only
   ever changes via an atomic rename of a good binary, and any download/verify
   failure removes the temp (the deferred Remove is a no-op ENOENT after a
   successful rename). Tests prove it with `assertNoTempFiles` (glob
@@ -453,7 +453,7 @@ runtime.GOARCH)` and passes the resolved `Platform` into `Install` via deps.
   Re-fetching a tiny checksum keeps fail-closed verification single-sourced in
   `DownloadAndVerify` (see [[dt-5o0x]]) — worth it.
 - **No API-key pre-gate on install (unlike [[dt-3gvq]]).** Design §2.3 scopes
-  `DN_API_KEY` "Required for enroll/unenroll" — _not_ install. `GET /v1/downloads`
+  `DN_API_KEY` "Required for enroll/unenroll" — *not* install. `GET /v1/downloads`
   is authenticated by the client; a missing key surfaces as the API's own clear
   error, not a bespoke pre-flight check. Held scope: didn't reuse
   `errMissingAPIKey` here.
@@ -469,9 +469,9 @@ runtime.GOARCH)` and passes the resolved `Platform` into `Install` via deps.
 Resolved)`) lost to its own "Test strategy" (`No network — the expected digest
 is passed in`).** Same conflict-resolution as [[dt-4h21]]/[[dt-brug]]: the two
   halves of the ticket disagreed, so I trusted the concrete behavioral half.
-  `Resolved` (from [[dt-hts2]]) carries only the checksum _URL_, never the digest
+  `Resolved` (from [[dt-hts2]]) carries only the checksum *URL*, never the digest
   — the digest comes from the sibling `.sha256` fetch ([[dt-4fgk]]
-  `fetchChecksum`/`DownloadAndVerify`) — so a `want Resolved` signature _forces_ a
+  `fetchChecksum`/`DownloadAndVerify`) — so a `want Resolved` signature *forces* a
   network fetch, contradicting "no network." Final shape: `NeedsInstall(path,
 expectedDigest string) (need bool, reason string, err error)` — pure, no ctx.
 - **Keeping it network-free single-sources fail-closed verification.** The
@@ -481,14 +481,14 @@ expectedDigest string) (need bool, reason string, err error)` — pure, no ctx.
   digest once, passes it to `NeedsInstall`; on `need` it calls `DownloadAndVerify`
   (which re-verifies). The tiny `.sha256` double-fetch is negligible and worth the
   single-sourced verification.
-- **Digest identity _is_ the version+integrity check.** A given dnclient version
+- **Digest identity *is* the version+integrity check.** A given dnclient version
   has a fixed binary digest, so "matches version AND checksum" collapses to one
   comparison: on-disk SHA-256 == expectedDigest → skip; else (missing or differs)
   → (re)install. No separate version probe (the binary exposes none cheaply).
 - **On any inspection error, return `need=false` (not true).** An unreadable/
-  locked target surfaces a clear error _and_ withholds the install signal, so a
+  locked target surfaces a clear error *and* withholds the install signal, so a
   caller that fails to check `err` can't be tricked into clobbering an
-  unreadable target. `os.ErrNotExist` is the _only_ error that means "install"
+  unreadable target. `os.ErrNotExist` is the *only* error that means "install"
   (need=true); every other read error propagates.
 - **Test the unreadable branch with a directory at the path, not chmod 000.**
   uid is 2000 here (non-root, so 000 would work) but a directory is
@@ -506,11 +506,11 @@ expectedDigest string) (need bool, reason string, err error)` — pure, no ctx.
 
 - **An "all children closed" epic that is NOT a verify-and-close.** Unlike
   [[dt-8h9t]]/[[dt-cq78]]/[[dt-zwgc]] (which re-read acceptance and closed with
-  zero code), dt-3gvq's three children built the _internal_ unenroll logic but no
+  zero code), dt-3gvq's three children built the *internal* unenroll logic but no
   child owned `main.go` wiring — the command was still `notImplemented`. The
   [[dt-brug]] note had explicitly deferred command wiring "to the parent
   epic/command tickets." The same "re-read acceptance against reality" discipline
-  that confirms some epics are done here exposed the missing seam: dt-3gvq _is_
+  that confirms some epics are done here exposed the missing seam: dt-3gvq *is*
   the unenroll command, so the integration is its remaining work. Re-reading
   beats trusting the `tk ready` "all children closed" signal either way.
 - **Testable-core / thin-wrapper split, applied at the command layer.** Mirrored
@@ -537,11 +537,11 @@ configRoot string)` is the testable core taking plain values. The core has **no
 - **Bounded deadline = `context.WithTimeout` in the core; default 10s.**
   `DN_API_TIMEOUT` (`cfg.APITimeout`) when >0, else `defaultUnenrollTimeout =
 10*time.Second` — the binary-side counterpart to the module's `TimeoutStopSec`
-  (§2.5/D5). The §2.5 local/remote invariant itself stays _inside_
+  (§2.5/D5). The §2.5 local/remote invariant itself stays *inside*
   `unenroll.Unenroll`; the command only sets the clock.
 - **Use a 403 (not a 5xx) to test the delete-failure branch fast.** The api
   transport retries 5xx/429 4× with ≥1s backoff ([[dt-egz4]]) — a 500 test would
-  take seconds. A 403 is non-2xx, non-404, and _not_ retried, so it exercises the
+  take seconds. A 403 is non-2xx, non-404, and *not* retried, so it exercises the
   "delete failed → local retained, exit 1" invariant immediately.
 - **Updated `TestNewApp_SubcommandsReturnNotImplemented` to drop `unenroll`.** A
   wired command breaks the blanket stub test — pruning its name (leaving the
@@ -555,7 +555,7 @@ configRoot string)` is the testable core taking plain values. The core has **no
   children ([[dt-ccmn]] JSON result writer, [[dt-zxwf]] slog JSON-to-stderr +
   level, [[dt-0jfp]] `--log-text`, [[dt-toaj]] `Secret` redaction) each shipped a
   piece; re-reading the epic's acceptance bullets against reality confirmed every
-  one is met _and_ test-covered: `TestWriteResultShape/SingleObject/OmitsEmpty`
+  one is met *and* test-covered: `TestWriteResultShape/SingleObject/OmitsEmpty`
   (stdout JSON), `TestNewLoggerJSONByDefault` (stderr JSON default),
   `TestNewLoggerTextMode` + `TestLogText_FlagWiredToLogOptions` (`--log-text`),
   `TestNewLoggerLevelFiltering/LevelParsing` (level), `TestSecretRedacts*`
@@ -566,13 +566,13 @@ configRoot string)` is the testable core taking plain values. The core has **no
   the default logger, and `main()` already does it twice: a bootstrap
   `slog.SetDefault(NewLogger(os.Stderr, …))` for pre-flag-parse failures, then the
   root `Before` hook re-runs it once `--log-text` is parsed. The one thing that
-  _looks_ un-wired — `withResult`→commands (commands are still `notImplemented`) —
+  *looks* un-wired — `withResult`→commands (commands are still `notImplemented`) —
   is **downstream command-ticket work by explicit prior decision** ([[dt-4h21]]:
   "did NOT wire `withResult` into the still-`notImplemented` commands; that's each
   command ticket's job"). So it's not an epic gap; it's a correctly-deferred seam.
 - **Test for "is the epic actually done": (a) every acceptance bullet has a green
-  test, (b) every process-level seam the epic _owns_ is wired in `main`, (c) any
-  un-wired seam is one a _closed_ ticket already assigned downstream.** All three
+  test, (b) every process-level seam the epic *owns* is wired in `main`, (c) any
+  un-wired seam is one a *closed* ticket already assigned downstream.** All three
   held → close. Sibling [[dt-zwgc]] (exit-status, both children closed) is the
   matching verify-and-close; **both** must close before the P0 command tickets
   ([[dt-koaf]]/[[dt-i0yx]]/[[dt-3gvq]]/dt-cmdg) unblock — closing one alone moves
@@ -586,14 +586,14 @@ configRoot string)` is the testable core taking plain values. The core has **no
 slog.NewJSONHandler }`, same `*slog.HandlerOptions{Level:…}` either way so
   level filtering is identical across modes (behavior 3 is free — the handler,
   not the format, owns the threshold). The text-mode test asserts the output is
-  _not_ JSON-parseable AND contains `msg=hello`/`level=INFO`/`host=abc`; a
+  *not* JSON-parseable AND contains `msg=hello`/`level=INFO`/`host=abc`; a
   JSON-only regression can't satisfy both.
 - **The flag can't be read in `main()` — flags aren't parsed until inside
-  `Run`.** `main()` calls `slog.SetDefault` _before_ `Run`, so it can't see
+  `Run`.** `main()` calls `slog.SetDefault` *before* `Run`, so it can't see
   `--log-text`. The fix is a root `Before` hook
   (`func(ctx, *cli.Command) (context.Context, error)`) that re-runs
   `slog.SetDefault(NewLogger(os.Stderr, logOptions(cmd)))` once global flags are
-  parsed. `main()` keeps a **bootstrap** JSON logger so failures _before_ the
+  parsed. `main()` keeps a **bootstrap** JSON logger so failures *before* the
   hook (e.g. a flag-parse error) still log; the hook reconfigures it. Two
   `SetDefault` calls is the standard bootstrap-then-refine pattern, not a smell.
 - **Behavior 4 ("flag wired") is tested by driving the real app and swapping one
@@ -622,19 +622,19 @@ slog.NewJSONHandler }`, same `*slog.HandlerOptions{Level:…}` either way so
   `resp.StatusCode` before reading the body — same D4 status-before-body
   discipline as [[dt-z99h]]'s `api.do`.
 - **Stream the hash with `io.Copy(dest, io.TeeReader(resp.Body, sha256.New()))`
-  — never buffer the whole binary.** The digest is computed over the _actual_
+  — never buffer the whole binary.** The digest is computed over the *actual*
   bytes written, so a truncated/corrupt body mismatches
   (`TestDownloadAndVerifyDigestOverActualStream` serves the full binary's
   checksum but a truncated body). On mismatch we return an error; `dest` may
   already hold (partial) bytes — that's by design. The contract is "on error,
-  don't trust dest"; the _installer_ (dt-5o0x) writes to a temp + rename, so
+  don't trust dest"; the *installer* (dt-5o0x) writes to a temp + rename, so
   this function is only the sink. Did **not** add temp-file/atomic-place logic
   here — that's dt-5o0x's job (scope-by-omission, the [[dt-j2ab]] pattern).
 - **Signature takes a plain `*http.Client`, not `*api.Client`.** The install
   command injects `api`'s `StandardClient()` (resilient/retrying transport) so a
   transient binary 5xx is retried ("after retry" behavior 4); unit tests pass
   `http.DefaultClient`. Keeping it a stdlib `*http.Client` means `internal/dnclient`
-  needs no `internal/api` import for _this_ file (it already imports api for
+  needs no `internal/api` import for *this* file (it already imports api for
   `Resolved`/`ResolveDownload` from [[dt-hts2]], but the verify path adds no new
   coupling and is trivially unit-testable with httptest).
 - **Tolerate whitespace in the checksum body even though §6.3 says "no trailing
@@ -657,12 +657,12 @@ slog.NewJSONHandler }`, same `*slog.HandlerOptions{Level:…}` either way so
   Same "trust the real contract over a toy signature" call as [[dt-4h21]]/[[dt-brug]].
   The caller dt-4fgk resolves first (pure), then does the download/verify I/O with
   its own ctx. revive's default set has no unused-parameter rule, so keeping it
-  wouldn't have been _flagged_ — dropping it is a design call, not a lint fix.
+  wouldn't have been *flagged* — dropping it is a design call, not a lint fix.
 - **"latest" resolves to the CONCRETE version string, not the map's literal
   `"latest"` alias.** The §6.1 downloads object has both `dnclient["latest"][key]`
   and `dnclient["0.9.5"][key]` (mirrors), plus `versionInfo.latest.dnclient ==
 "0.9.5"`. When version is unset/`latest`, resolve via `VersionInfo.Latest.DNClient`
-  to the concrete `"0.9.5"`, then look the URL up under _that_ key — so
+  to the concrete `"0.9.5"`, then look the URL up under *that* key — so
   `Resolved.Version` is always concrete. dt-4fgk's "skip download if installed
   version matches" (design Req 1) can't compare against the string `"latest"`; it
   needs the concrete version. Empty `versionInfo.latest.dnclient` → clear error
@@ -681,9 +681,9 @@ slog.NewJSONHandler }`, same `*slog.HandlerOptions{Level:…}` either way so
 
 - **One redaction has to cover four leak paths, not just slog.** `config.Secret`
   (a `type Secret string` in `internal/config/secret.go`) implements
-  `slog.LogValuer` _and_ `fmt.Stringer` _and_ `fmt.GoStringer` _and_
+  `slog.LogValuer` *and* `fmt.Stringer` *and* `fmt.GoStringer` *and*
   `json.Marshaler` — all returning `"REDACTED"`. slog alone is insufficient: when
-  you log a _struct_ that embeds the secret (`slog.Any("config", cfg)`), the JSON
+  you log a *struct* that embeds the secret (`slog.Any("config", cfg)`), the JSON
   handler doesn't recurse into `LogValue` for nested fields — it `json.Marshal`s
   the struct, so the field leaks unless `MarshalJSON` redacts. And a bare
   `type X string` leaks under `%v/%s/%q/%+v` (needs `String`) and under `%#v`
@@ -694,7 +694,7 @@ slog.NewJSONHandler }`, same `*slog.HandlerOptions{Level:…}` either way so
   not just the logger.
 - **The killer subtlety: redact on the way OUT, keep the real value on the way
   IN — by implementing `MarshalJSON` but NOT `UnmarshalJSON`.** `api.EnrollmentCode.Code`
-  is now `config.Secret`, and the code arrives _as JSON_ from the create
+  is now `config.Secret`, and the code arrives *as JSON* from the create
   response. Because `Secret` has no custom `UnmarshalJSON`, encoding/json falls
   back to default string assignment, so `{"code":"SECRET"}` unmarshals to the
   real `Secret("SECRET")` — the already-green `TestCreateHostAndEnrollmentCode`
@@ -738,9 +738,9 @@ slog.NewJSONHandler }`, same `*slog.HandlerOptions{Level:…}` either way so
 - **The `enroll.API` interface is the natural subset of `*api.Client`
   (ListHosts/CreateHostAndEnrollmentCode/DeleteHost), grounded — not invented.**
   Defining all three even though row 1 calls none is fine: interface methods are
-  _not_ flagged by `unused` (unlike funcs/vars, the [[dt-z99h]] pattern), and the
+  *not* flagged by `unused` (unlike funcs/vars, the [[dt-z99h]] pattern), and the
   method names must match `*api.Client` verbatim to satisfy it, so siblings can
-  only _use_ them, never need to rename. The no-op test injects a `failingAPI`
+  only *use* them, never need to rename. The no-op test injects a `failingAPI`
   whose every method `t.Fatal`s — proving "zero API calls" structurally rather
   than by call-count.
 - **The ticket's literal `ConfigExists(networkName string) bool` signature lost
@@ -750,7 +750,7 @@ bool` for consistency and testability (temp-dir root). Same "trust the real
   contract over a ticket's toy signature" call as [[dt-4h21]]. Extracted a shared
   unexported `configPath(root, network)` and pointed both `ConfigExists` and
   `ReadHostID` at it — kills the duplicated `filepath.Join(...,"dnclient.yml")`.
-  `ConfigExists` is a _presence_ probe only (`os.Stat`, err==nil): a non-not-exist
+  `ConfigExists` is a *presence* probe only (`os.Stat`, err==nil): a non-not-exist
   stat error reads as not-present so enroll proceeds to the create path rather
   than masking the condition (the full host_id parse stays in `ReadHostID`).
 - **Behavior 2 (exit semantics) needed no command wiring — it's composition with
@@ -770,7 +770,7 @@ bool` for consistency and testability (temp-dir root). Same "trust the real
 
 - **The ticket's literal `return ExitError(nil, CodeNoOpAssert)` does NOT
   produce exit 2 — it produces exit 0.** [[dt-icq8]] deliberately made
-  `output.ExitError(nil, …)` return a _true nil interface_ (the typed-nil trap
+  `output.ExitError(nil, …)` return a *true nil interface* (the typed-nil trap
   guard, asserted by `TestExitError_NilErrorReturnsNilInterface`), so a nil err
   collapses to nil → `ResolveExitCode(nil)` → `CodeOK`. The fix is a non-nil
   package sentinel `errNoChange = errors.New("no change made")`; the no-op path
@@ -780,7 +780,7 @@ bool` for consistency and testability (temp-dir root). Same "trust the real
   `*cli.Command` to read the global `--assert-changed` flag and the stdout
   writer, so it can't sit in `output`. Shape: `withResult(action resultAction)
 cli.ActionFunc` where `resultAction = func(ctx, *cli.Command) (output.Result,
-error)`. It writes the Result to `cmd.Root().Writer` _then_ applies the no-op
+error)`. It writes the Result to `cmd.Root().Writer` *then* applies the no-op
   check — so the machine-readable result is emitted even on the exit-2 path (a
   pipeline still gets the outcome). The **error path is checked before** the
   `!Changed` branch, so code 2 can never collide with a failure (behavior 4).
@@ -788,12 +788,12 @@ error)`. It writes the Result to `cmd.Root().Writer` _then_ applies the no-op
   free** — urfave/cli v3 inherits root `Flags` into subcommand lookups
   ([[dt-ecf9]]), no `Persistent:true` needed.
 - **Tests MUST capture `cli.OsExiter`, not the returned error.** urfave/cli v3
-  _auto-exits inside `Run`_ when an action returns a `cli.ExitCoder` ([[dt-icq8]]):
+  *auto-exits inside `Run`* when an action returns a `cli.ExitCoder` ([[dt-icq8]]):
   it calls `cli.HandleExitCoder` → `cli.OsExiter` (real `os.Exit`) before `Run`
   returns, so a stub returning `ExitError` kills the test binary unless OsExiter
   is overridden. Reused the existing `captureExit(t)` helper (sentinel `-1` =
   never called = success 0) and mirrored `main()`'s `if err != nil {
-exitWithError(err) }` so the helper reports the true _production_ exit code for
+exitWithError(err) }` so the helper reports the true *production* exit code for
   all four cells (ExitCoder via Run's internal call; plain-err/nil via the
   mimic). Driving stub commands through a real `*cli.Command` app is the
   integration the ticket asked for.
@@ -807,10 +807,10 @@ exitWithError(err) }` so the helper reports the true _production_ exit code for
 ## API resilience epic — sometimes "all children closed" really does mean done (dt-8h9t, 2026-06-06)
 
 - **The dt-uzx6/dt-vsi6 "re-read acceptance against reality" discipline cuts
-  both ways: it can also confirm an epic is _complete_, not just expose a seam.**
+  both ways: it can also confirm an epic is *complete*, not just expose a seam.**
   This P0 epic appeared in `tk ready` with all 5 children closed (egz4 retry,
   z99h core+D4 status-before-body, 255n endpoints, ihil pagination, 4b0e error
-  typing). Applying the same re-read, every acceptance bullet was met _and_
+  typing). Applying the same re-read, every acceptance bullet was met *and*
   tested: the httptest matrix the epic names verbatim
   (success / 4xx-no-retry / 5xx+429-retry / timeout / malformed-body) all pass,
   the public `New(cfg)` entry point is exercised by ~24 tests, `code`/`path` is
@@ -818,15 +818,15 @@ exitWithError(err) }` so the helper reports the true _production_ exit code for
   paths (no version-prefix assumption) handle the v1-delete / v2-create split.
   **Closed with zero code change** — fabricating work would have been worse than
   doing none. `tk` does not auto-close an epic when its children close, so the
-  verify-and-close _is_ the epic's terminal action; it unblocked the 3 command
+  verify-and-close *is* the epic's terminal action; it unblocked the 3 command
   tickets (dt-3gvq, dt-i0yx, dt-koaf).
 - **The one acceptance phrase that looks open — "all calls bounded by
   DN_API_TIMEOUT" — is a per-command seam the epic does NOT own.** The client
   honors any context deadline (proven by `TestOverallDeadlineBoundsRetries`,
-  which bounds the _retry chain_, not just one request); binding
+  which bounds the *retry chain*, not just one request); binding
   `config.APITimeout` → call ctx is downstream consumption. The evidence it's
   command-owned is concrete and pre-existing: `config.go` deliberately leaves
-  `APITimeout` 0 ("command picks default"), §2.3 gives _different_ per-command
+  `APITimeout` 0 ("command picks default"), §2.3 gives *different* per-command
   defaults (~30s enroll / ~10s unenroll), and the already-closed
   `unenroll.go` comments "already bounded by DN*API_TIMEOUT at the command
   layer." So there is no command-agnostic bridge to build (the differing
@@ -842,36 +842,36 @@ exitWithError(err) }` so the helper reports the true _production_ exit code for
 
 - **Same dt-vsi6 lesson, second instance: an epic with all children closed
   still owns its integration scaffolding.** The 4 children delivered the
-  _pieces_ — `Load(getenv)` (env-only, [[dt-mhir]]), `ParseEnvFile(io.Reader)`
+  *pieces* — `Load(getenv)` (env-only, [[dt-mhir]]), `ParseEnvFile(io.Reader)`
   (reader→map, [[dt-kiqk]]), `Resolve(fileVars, getenv)` (precedence,
-  [[dt-9x3y]]) — but **nothing bridged the `--env-file` flag _path_ to disk**.
+  [[dt-9x3y]]) — but **nothing bridged the `--env-file` flag *path* to disk**.
   `ParseEnvFile` takes a reader; no one called `os.Open`. Re-reading the epic's
-  acceptance ("all DN\_* load from env *and\* --env-file") against reality exposed
+  acceptance ("all DN\_*load from env*and\* --env-file") against reality exposed
   the seam. The fix is one function, `config.LoadWithEnvFile(envFilePath,
 getenv)` in `resolve.go`: empty path → `Resolve(nil, getenv)`; set path →
   `os.Open` + `ParseEnvFile` + `Resolve`, wrapping open/parse failures with
   `%w` (missing file wraps `os.ErrNotExist`, asserted via `errors.Is`).
 - **This is the single entry point the 5 blocked commands call** (enroll,
   unenroll, install, REST client, write-config) — they were blocked on the epic
-  precisely because they need _one_ call to turn the flag + live env into a
+  precisely because they need *one* call to turn the flag + live env into a
   validated `*Config`. Held scope hard (the [[dt-j2ab]]/[[dt-toqi]] pattern):
   did **not** wire it into the still-`notImplemented` commands or re-touch the
   README — per-command consumption is downstream-ticket work, and the
-  `§Precedence` README section already shipped with dt-9x3y. An _exported_
+  `§Precedence` README section already shipped with dt-9x3y. An *exported*
   function with only `_test.go` callers is **not** flagged by `unused` (unlike
   unexported funcs), so the gate stays green with no premature caller.
 - **TDD tracer bullet caught the only real RED.** Test 1 (empty path) failed to
   compile (`undefined: LoadWithEnvFile`) = genuine red; the precedence + two
   error-path tests went green on first run because they exercise branches I'd
-  just written by _reusing_ the well-tested `Resolve`/`ParseEnvFile`. The value
+  just written by *reusing* the well-tested `Resolve`/`ParseEnvFile`. The value
   there is locking the end-to-end file-open→parse→resolve contract, not
   discovering new logic. Empty `getenv` paths set `DN_HOSTNAME` so the
   hostname fallback never touches the real host (no need for the unexported
   `resolve`'s injected-hostname seam here).
-- **`make build` must run from the repo root, not `src/`.** The Makefile lives
-  at `/workspace/Makefile` and `cd`s into `src/` itself; running `make build`
-  from `src/` gives "No rule to make target 'build'". The persistent-cwd Bash
-  tool will strand you in `src/` after a `cd` — prefix with `cd /workspace &&`.
+- **`make build` runs from the repo root, where the Go module now lives.** The
+  Makefile and `go.mod` sit side by side at the repository root (the module was
+  migrated up from `src/` in dt-370b), so Go invocations run directly from
+  `$(CURDIR)` with no `cd` into a subdirectory.
 
 ## CI workflow — last acceptance item of the P0 epic (dt-vsi6, 2026-06-06)
 
@@ -879,25 +879,25 @@ getenv)` in `resolve.go`: empty path → `Resolve(nil, getenv)`; set path →
   closed but one un-tracked acceptance gap: CI.** dt-vsi6's "Current state &
   gaps" struck through flake/version/Makefile gaps but never listed CI, while
   its acceptance criteria and design §2.12 step 1 both name CI. Lesson: when an
-  epic shows in `tk ready` with all children closed, re-read its _acceptance
-  criteria_ against reality — the residual scaffolding (here `.github/workflows/ci.yml`)
+  epic shows in `tk ready` with all children closed, re-read its *acceptance
+  criteria* against reality — the residual scaffolding (here `.github/workflows/ci.yml`)
   is the epic's own work, not a missing child ticket.
 - **CI just runs `make build` — don't reimplement the gate in YAML.** The
   Makefile already encodes fmt-check/vet/lint/test/compile (see
   [[dt-prt6]] for the lint stage), so the workflow is one `run: make build`. No
   per-step duplication; the gate stays single-sourced in the Makefile.
-- **Go version comes from `src/go.mod` via `actions/setup-go@v5`
+- **Go version comes from `go.mod` via `actions/setup-go@v5`
   `go-version-file:`**, not a hardcoded string — so CI tracks the `go 1.26.0`
   directive ([[dt-0mdh]] relaxed it to the minor series for nixpkgs parity) and
-  can't drift. `cache-dependency-path: src/go.sum` because the module lives under
-  `src/`, not repo root.
+  can't drift. `cache-dependency-path: go.sum`; both files live at the repo root
+  after the dt-370b module migration.
 - **golangci-lint must be on PATH for `make lint`, pinned to v2.12.2.** The
   Makefile's `lint` target shells out to the `golangci-lint` binary, so CI
-  installs it from the _version-tagged_ install script
+  installs it from the *version-tagged* install script
   (`.../golangci-lint/v2.12.2/install.sh … v2.12.2`) — fully pinned, not `HEAD` —
   onto `$(go env GOPATH)/bin`, then appends that dir to `$GITHUB_PATH` (setup-go
   does not add GOPATH/bin to PATH). Version matches the local toolchain and the
-  v2 config schema at `src/.golangci.yml`.
+  v2 config schema at `.golangci.yml` (repo root).
 - **No pyyaml in this sandbox; `pip` is PEP-668 externally-managed.** Validate
   workflow YAML with `python3 -m pip install pyyaml --break-system-packages`
   (sandbox-only, acceptable) then `yaml.safe_load`. Note the YAML `on:` key
@@ -955,7 +955,7 @@ path` to confirm the hash here rather than a full build.
 
 ## OS/arch detection — published ≠ supported (dt-ewgz, 2026-06-06)
 
-- **The behavior-4 `linux/mips` case fails _on purpose_, even though the
+- **The behavior-4 `linux/mips` case fails *on purpose*, even though the
   downloads API publishes `linux-mips`.** API ref §6.2 lists `linux-mips`,
   `linux-386`, `linux-armv5/6/7`, `ppc64le`, `riscv64`, etc. as real keys — but
   the ticket's acceptance is "supported linux/{amd64,arm64} map; non-Linux and
@@ -970,7 +970,7 @@ path` to confirm the hash here rather than a full build.
   divergence (key `armv7` vs URL path `arm-7`, and GOARM not being in the
   `(goos,goarch)` signature) only bites if those arches are ever added — that
   belongs to [[dt-hts2]] (download URL resolution), the ticket this unblocks.
-- **Scope held by _omission_ again** (same pattern as [[dt-j2ab]]/[[dt-toqi]]):
+- **Scope held by *omission* again** (same pattern as [[dt-j2ab]]/[[dt-toqi]]):
   resisted adding a `DownloadKey()`/URL-path helper to `Platform`. The
   `linux-amd64` key and `linux/amd64` path construction is dt-hts2's job;
   building it here would pre-empt that ticket's tests. The struct stays a pure
@@ -991,11 +991,11 @@ LogOptions) *slog.Logger` rules out surfacing a bad `DN_LOG_LEVEL`. `parseLevel`
 - **slog renders levels UPPERCASE in JSON** — the record's `level` field is
   `"INFO"`/`"WARN"`, not lowercase. Tests assert `rec["level"] == "INFO"`. Don't
   expect the `DN_LOG_LEVEL` input casing to survive into the output.
-- **Scope boundary with [[dt-0jfp]] held by _declaring but not branching_.**
+- **Scope boundary with [[dt-0jfp]] held by *declaring but not branching*.**
   `LogOptions.Text` exists (the interface contract dt-0jfp extends) but `NewLogger`
   ignores it — output is always JSON here. So `NewLogger(&buf, {Text:true})` still
   emits JSON, leaving dt-0jfp a genuine red test for its TextHandler branch +
-  `--log-text` wiring. An unused _struct field_ is not flagged by `unused` (unlike
+  `--log-text` wiring. An unused *struct field* is not flagged by `unused` (unlike
   an unused func/var), so the gate stays green. Same pre-emption-avoidance pattern
   as [[dt-j2ab]]/[[dt-toqi]].
 - **Behavior 4 ("stderr in production") is a one-line `main()` wiring, closing the
@@ -1014,22 +1014,22 @@ os.Getenv("DN_LOG_LEVEL")}))` makes the api client's `slogLeveledLogger` (over
 
 ## Unenroll failure invariant — honest message (dt-f7nx, 2026-06-06)
 
-- **The invariant was already enforced; this ticket was the _messaging_ + the
+- **The invariant was already enforced; this ticket was the *messaging* + the
   missing failure tests.** [[dt-2t72]] gated `os.RemoveAll` strictly behind a
   successful/404 delete, so "retain local on failure" was structurally done and
   green. dt-f7nx's real delta is a single package const, `unenrollFailureAdvisory`,
   appended to the delete-failure error. Don't go looking for a behavior change in
   the removal logic — there isn't one.
 - **`fmt.Errorf("...: %w; %s", hostID, err, advisory)` keeps the chain.** The
-  honest suffix is a plain `%s` _after_ the `%w`, so `errors.Is(err,
+  honest suffix is a plain `%s` *after* the `%w`, so `errors.Is(err,
 context.DeadlineExceeded)` still crosses it. Putting the advisory before `%w`
   or using a second `%w` (Go 1.20 multi-wrap) both work, but single-`%w` +
   trailing `%s` is the least surprising and what the deadline test pins.
-- **"exit ≠ 0" needs no `output.ExitError`.** `Unenroll` returns a _plain_ error;
+- **"exit ≠ 0" needs no `output.ExitError`.** `Unenroll` returns a *plain* error;
   `main.exitWithError` maps any non-`ExitCoder` to `CodeError` (1) — see
   [[dt-icq8]]. The test asserts the consequence directly in-package via
   `output.ResolveExitCode(err)` (≠ `CodeOK` and ≠ `CodeNoOpAssert`) rather than
-  booting the CLI. Reserve `ExitError` for the _distinct_ code-2 assert-changed
+  booting the CLI. Reserve `ExitError` for the *distinct* code-2 assert-changed
   no-op ([[dt-4h21]]); failures stay plain.
 - **Deadline path is testable without sleeping.** The `fakeDeleter` now returns
   `ctx.Err()` when the context is done (a real ctx-bounded api.Client does the
@@ -1040,19 +1040,19 @@ context.DeadlineExceeded)` still crosses it. Putting the advisory before `%w`
 
 ## Exit-code mapping + ExitCoder wiring (dt-icq8, 2026-06-06)
 
-- **urfave/cli v3 auto-exits _inside_ `Command.Run` when an Action returns a
+- **urfave/cli v3 auto-exits *inside* `Command.Run` when an Action returns a
   `cli.ExitCoder`.** The default error handler calls `HandleExitCoder` →
   `cli.OsExiter` (= `os.Exit`) before `Run` returns. So a test whose stub action
   returns `output.ExitError(...)` will kill the test binary unless it first
   overrides `cli.OsExiter` (and restore via `t.Cleanup`). Plain (non-ExitCoder)
-  errors are _not_ auto-exited — `HandleExitCoder` is a no-op for them — so they
+  errors are *not* auto-exited — `HandleExitCoder` is a no-op for them — so they
   fall through and `main` maps them. Behavior-4 ("deferred cleanup runs on error")
   is therefore cleanest tested with a plain error: `Run` returns it, the defer
   already ran, no `OsExiter` dance.
 - **Two surfaces, one mapping.** `output.ResolveExitCode(err) int` is the pure
   source of truth (nil→0, `cli.ExitCoder`→its code via `errors.As`, else 1) and is
   table-tested directly. `main.exitWithError` does the same resolution but routes
-  through `cli.HandleExitCoder` for its _side effects_ (prints the message to
+  through `cli.HandleExitCoder` for its *side effects* (prints the message to
   `cli.ErrWriter`, calls `cli.OsExiter`). They agree by construction; the pure one
   is what new code should call when it just needs the number.
 - **`ExitError` preserves the chain (`Unwrap`), `cli.Exit` does not.** Defined a
@@ -1060,7 +1060,7 @@ context.DeadlineExceeded)` still crosses it. Putting the advisory before `%w`
   cross it — `cli.Exit(msg,code)` flattens to a string message and loses the
   wrapped error. Guard `ExitError(nil,…)→nil` to avoid the typed-nil-interface
   trap. Compile-time guard is a package-level `var _ cli.ExitCoder =
-(*exitError)(nil)`, not a `var _ = ` inside a test func (staticcheck QF1011 +
+(*exitError)(nil)`, not a `var _ =` inside a test func (staticcheck QF1011 +
   revive unused-`t` both fire on the in-test form).
 - **Lives in `internal/output`, not `internal/exit`.** Matches the ticket's
   primary suggestion and dodges revive stutter: `output.ExitError` is clean,
@@ -1071,14 +1071,14 @@ context.DeadlineExceeded)` still crosses it. Putting the advisory before `%w`
   `output.ExitError(err, output.CodeNoOpAssert)`.
 - **Unknown-command exit is 3, by framework design** (`help.go:319`
   `return Exit(errMsg, 3)`) — an `ExitCoder` my wiring honors verbatim. Req 8's
-  0/1 mapping is about _action_ success/failure; usage errors keep urfave's 3.
+  0/1 mapping is about *action* success/failure; usage errors keep urfave's 3.
 
 ## JSON result writer (dt-ccmn, 2026-06-06)
 
 - **Closes the [[dt-2t72]] handoff: `Result` was left verbatim, not redefined.**
-  dt-2t72 pre-created `internal/output` with _only_ the `Result` struct to bridge
+  dt-2t72 pre-created `internal/output` with *only* the `Result` struct to bridge
   a dep-graph gap and warned "don't redefine `Result`". dt-ccmn honored that — it
-  adds _only_ `WriteResult`; the struct already matched the ticket's documented
+  adds *only* `WriteResult`; the struct already matched the ticket's documented
   interface exactly, so no edit to it. The graph gap is now fully resolved.
 - **`json.NewEncoder(w).Encode(r)` gives "one object + one newline" for free.**
   The behavior-2 requirement (single JSON object, a trailing newline, nothing
@@ -1099,7 +1099,7 @@ context.DeadlineExceeded)` still crosses it. Putting the advisory before `%w`
   allowed either; chose a separate package since unenroll is the inverse command
   and `run` (dt-n5p5) will compose enroll+unenroll — keeps `enroll` from becoming
   a god-package. Design §2.9's structure is "tentative" and didn't forbid it.
-- **Created `internal/output` with _only_ the `Result` struct.** The dt-2t72
+- **Created `internal/output` with *only* the `Result` struct.** The dt-2t72
   interface returns `output.Result`, but the output package didn't exist and
   dt-ccmn (which owns it) is **not** a dependency of this ticket — a graph gap.
   Resolved by defining just the struct (matching dt-ccmn's documented
@@ -1107,10 +1107,10 @@ context.DeadlineExceeded)` still crosses it. Putting the advisory before `%w`
   `WriteResult` + writer tests. The struct is the shared contract, defined once,
   so both tickets coexist with no duplicate-type conflict. Watch for this when
   picking up dt-ccmn: don't redefine `Result`.
-- **Local removal is gated strictly behind a successful delete — that _is_ the
+- **Local removal is gated strictly behind a successful delete — that *is* the
   §2.5 invariant.** `os.RemoveAll(<root>/<network>)` runs only after
   `api.DeleteHost` returns nil, so a delete failure retains local config (no
-  orphan). This previews dt-f7nx (the failure _messaging_/invariant ticket) but
+  orphan). This previews dt-f7nx (the failure *messaging*/invariant ticket) but
   the gating itself is just correct ordering; covered by
   `TestUnenrollDeleteFailureRetainsLocal`.
 - **Behaviors 1 (2xx) and 2 (404) collapse at this layer.** `api.DeleteHost`
@@ -1151,7 +1151,7 @@ non-empty else fileVars[key]`. An empty live value is treated as unset →
 
 ## Read host_id from dnclient.yml (dt-0nl5, 2026-06-06)
 
-- **New `internal/dnclient` package; `gopkg.in/yaml.v3` is now a _direct_ dep
+- **New `internal/dnclient` package; `gopkg.in/yaml.v3` is now a *direct* dep
   (v3.0.1).** First YAML use in the repo. `go mod tidy` also pulled
   `fatih/color`/`mattn/go-isatty`/`golang.org/x/sys` as indirects (transitive via
   the existing retryablehttp/cleanhttp chain, surfaced now) — expected, not new
@@ -1159,19 +1159,19 @@ non-empty else fileVars[key]`. An empty live value is treated as unset →
   `vendorHash`).
 - **Decode only `host_id`, not the whole dnclient schema.** A one-field anonymous
   struct (`struct{ HostID string \`yaml:"host_id"\` }`) — the file's schema is
-owned by `dnclient`, not us (API ref §5 note), so modeling more would couple us
+owned by`dnclient`, not us (API ref §5 note), so modeling more would couple us
 to a foreign format. yaml.v3 ignores unknown keys by default, so real configs
-with `pki:`/etc. parse fine.
+with`pki:`/etc. parse fine.
 - **`ErrNotEnrolled` is a package `var` sentinel, wrapped with `%w`.** Missing
   file → `fmt.Errorf("%s: %w", path, ErrNotEnrolled)` so dt-2t72's unenroll branch
   uses `errors.Is`, never string-matching (same contract as api's `*APIError` /
-  [[dt-4b0e]]). Crucially the _other_ failures (missing field, malformed YAML)
+  [[dt-4b0e]]). Crucially the *other* failures (missing field, malformed YAML)
   must NOT match it — each has its own test asserting `!errors.Is(err,
 ErrNotEnrolled)`, so "not enrolled" and "enrolled-but-broken-config" stay
   distinct decisions for the caller.
 - **`os.ErrNotExist` is the only not-enrolled signal.** `os.ReadFile` error is
   split: `errors.Is(err, os.ErrNotExist)` → `ErrNotEnrolled`; any other read error
-  (perms, IO) → wrapped `reading <path>` error, _not_ not-enrolled — a permission
+  (perms, IO) → wrapped `reading <path>` error, *not* not-enrolled — a permission
   failure on a present file shouldn't read as "host isn't enrolled".
 - **Empty `host_id` is treated as missing.** `doc.HostID == ""` covers both an
   absent key and an explicit `host_id:` (null/empty) — yaml.v3 leaves the field
@@ -1182,16 +1182,16 @@ ErrNotEnrolled)`, so "not enrolled" and "enrolled-but-broken-config" stay
 
 ## Enroll request building + required-param validation (dt-j2ab, 2026-06-06)
 
-- **Behavior 4 ("tun device = network name") is satisfied by an _absence_, not a
+- **Behavior 4 ("tun device = network name") is satisfied by an *absence*, not a
   field.** The ticket lists it as a TDD behavior for `buildCreateRequest`, but
   [[dt-255n]] already established the v2 create-host body has no tun/network-name
   field (API ref §4.1) — the tun device is named at `dnclient enroll` time, not
-  in the POST. Reconciled by _not_ adding the field and locking the invariant
+  in the POST. Reconciled by *not* adding the field and locking the invariant
   with `TestBuildCreateRequestOmitsTunField`: marshal the request, assert no
   `tun`/`tunName`/`deviceName`/`networkName` key and that `DN_NETWORK_NAME`'s
   value doesn't leak into the body. This prevents a future change from smuggling
   the network name into the request to "fix" the literal ticket wording.
-- **Required-param validation names the _first_ missing one, in a fixed order.**
+- **Required-param validation names the *first* missing one, in a fixed order.**
   API key → network ID → role ID, via a `switch` with empty-string cases, each
   returning `missingParam("DN_*")`. Errors carry the `DN_*` env-var name (what an
   operator actually sets), not the Go field name. Req 2 requires roleID even
@@ -1219,7 +1219,7 @@ ErrNotEnrolled)`, so "not enrolled" and "enrolled-but-broken-config" stay
 - **Port `0` is a valid value, not "unset".** Bounds check is `0 <= p <= 65535`
   (0 = auto-select, matching dt-255n sending `listenPort` always, no omitempty).
   Negative and >65535 error with the var name; non-numeric falls through from
-  `strconv.Atoi`. The lighthouse/relay "non-zero port required" rule is _not_
+  `strconv.Atoi`. The lighthouse/relay "non-zero port required" rule is *not*
   here — that's a per-command validation (dt-j2ab), this task only rejects
   out-of-range bytes.
 - **Bools/timeout were already done in [[dt-mhir]]** (`strconv.ParseBool` /
@@ -1229,7 +1229,7 @@ ErrNotEnrolled)`, so "not enrolled" and "enrolled-but-broken-config" stay
 - **Handoff to dt-druh (config→env-file serializer):** `Tags`/`StaticAddrs`
   must be re-emitted as JSON (`json.Marshal` → `["a","b"]`) so the next
   `ParseEnvFile`→`Load` round-trips. Combined with the dt-kiqk note (re-quote
-  empty/whitespace values), the serializer needs both quote-on-write _and_
+  empty/whitespace values), the serializer needs both quote-on-write *and*
   JSON-encode-arrays to survive a parse.
 
 ## env-file parser, SEC3 (dt-kiqk, 2026-06-06)
@@ -1237,16 +1237,16 @@ ErrNotEnrolled)`, so "not enrolled" and "enrolled-but-broken-config" stay
 - **SEC3 passes the moment you do nothing.** The behavior-4 test
   (`K=$(rm -rf /)`, backticks, `$VAR`, `;`/`&&`) went green immediately — the
   parser never expands, so the literal-byte assertion held on first run. That's
-  the point: the security property is the _absence_ of an expansion code path,
+  the point: the security property is the *absence* of an expansion code path,
   not a feature to add. The test exists to lock the absence in so a later
   "convenience" interpolation can't sneak in unnoticed. Keep it.
 - **Value-trimming is a deliberate spec gap fill.** The ticket's format rules
   say "trim surrounding whitespace around KEY" and are silent on the value.
-  Chose to `TrimSpace` the value too, _then_ strip one layer of matching
+  Chose to `TrimSpace` the value too, *then* strip one layer of matching
   quotes — because the quote rule (`K="a b"` → `a b`) only makes sense if
   unquoted whitespace is otherwise stripped; quotes are how you opt back into
   intentional leading/trailing spaces. Ordering matters: trim → unquote, so
-  `K = "  x  "` → `  x  `. dt-druh's serializer must round-trip this: any value
+  `K = "  x  "` → `x`. dt-druh's serializer must round-trip this: any value
   with leading/trailing space (or that's empty) has to be re-quoted on write,
   or the next parse will mangle it.
 - **Unbalanced/mismatched quotes stay literal, not an error.** `K="oops` and
@@ -1363,7 +1363,8 @@ nextCursor == ""`.
   plus `linters.enable`, formatters moved to a separate top-level `formatters:`
   block, and exclusions live under `linters.exclusions.rules`. The v1 example in
   the golang skill (`linters.enable` list + `linters-settings`) will not parse.
-  Config lives at `src/.golangci.yml` (the lint target runs `cd src && golangci-lint run`).
+  Config lives at `.golangci.yml` at the repo root (the lint target runs
+  `golangci-lint run` from `$(CURDIR)`).
 - **Behavior 4 ("forbid `_ =` to mute errors") is a review convention, not
   `errcheck.check-blank`.** Enabling check-blank would flag the project's own
   deliberate idioms — `_ = resp.Body.Close()` (api/client.go) and `_, _ =
@@ -1374,7 +1375,7 @@ w.Write(...)` in httptest handlers — breaking `make validate` and contradictin
 - **revive's stutter check fights a deliberate API name.** revive's `exported`
   rule flags `api.APIError`/`APIErrorItem` as stutter, but those names are load-
   bearing (see the dt-4b0e note below — `errors.As(err, &apiErr)`). Suppressed via
-  a _scoped_ exclusion (`path: internal/api/`, `text: stutters`) so the rule stays
+  a *scoped* exclusion (`path: internal/api/`, `text: stutters`) so the rule stays
   live everywhere else, rather than renaming another ticket's public type or
   dropping the rule globally.
 - **Specifying `revive.rules` replaces revive's whole default rule set** — so to
@@ -1399,7 +1400,7 @@ w.Write(...)` in httptest handlers — breaking `make validate` and contradictin
   whenever the transport lands. Until then `httpClient` is still
   `http.DefaultClient` (one request, never retried), so the httptest "count==1"
   assertions hold both before and after dt-egz4.
-- **D4 invariant survived the envelope parse.** The non-2xx branch now _does_
+- **D4 invariant survived the envelope parse.** The non-2xx branch now *does*
   read the body (to parse `{"errors":[…]}`), which seems to contradict the
   dt-z99h note "returns before touching the body". The invariant that actually
   matters is narrower: `out` is never populated on failure. The body is read
@@ -1420,7 +1421,7 @@ w.Write(...)` in httptest handlers — breaking `make validate` and contradictin
 ## API client core (dt-z99h, 2026-06-06)
 
 - **D4 fix is an ordering invariant, not a feature.** `do` returns on a non-2xx
-  `resp.StatusCode` _before_ touching the body, so a 5xx with a junk payload
+  `resp.StatusCode` *before* touching the body, so a 5xx with a junk payload
   never reaches the JSON decoder and never populates `out`. The test asserts
   this two ways: the call errors, and a pre-seeded `out` field is left
   unchanged. Keep this ordering when dt-4b0e adds typed errors — parse the
@@ -1450,7 +1451,7 @@ w.Write(...)` in httptest handlers — breaking `make validate` and contradictin
   inject a system dependency while preserving a clean public signature.
 - **Scope boundary with dt-toqi.** `DN_TAGS` / `DN_STATIC_ADDRESSES` are
   declared as `[]string` fields but left unparsed here — JSON-array decoding is
-  dt-toqi's job (the field comments say so). Bools/port/duration _are_ parsed
+  dt-toqi's job (the field comments say so). Bools/port/duration *are* parsed
   here (behavior 5 requires the module-only bools to populate), returning
   wrapped errors on malformed input rather than silently defaulting.
 - **`APITimeout` has no single default.** §2.3 lists "~30s enroll / ~10s
@@ -1475,10 +1476,82 @@ w.Write(...)` in httptest handlers — breaking `make validate` and contradictin
 - **Flag scoping:** root `Flags` are global/inherited; a flag placed only on a
   subcommand's `Flags` is local to it. `--force` lives on `enroll` only.
 - **go.mod stays minimal:** urfave/cli/v3 is stdlib-only, so `go mod tidy`
-  adds no indirect requires (testify/yaml get _downloaded_ as cli's own test
+  adds no indirect requires (testify/yaml get *downloaded* as cli's own test
   deps but are not recorded in our go.mod). `go.sum` is committed — the flake
   packaging (dt-0mdh) needs it for `vendorHash`.
 - **Testing the CLI without running it:** `newApp()` returns the root command
   with no I/O side effects, so tests introspect `.Commands`/`.Flags` directly
   and only call `app.Run` (with buffers wired to `Writer`/`ErrWriter`) for
   `--version` and stub-error behavior.
+
+## Go module root migration (dt-370b, 2026-07-24)
+
+- **Moving the module up requires zero `.go` edits when the module path already
+  omits the subdir.** `go.mod` declared `github.com/andreswebs/dn-tool` (no
+  `/src`), so `git mv src/{go.mod,go.sum,.golangci.yml,cmd,internal}` to the
+  root left every import resolving unchanged. Use `git mv` to preserve history
+  and stage the rename; `.golangci.yml` is a dotfile, so move it explicitly
+  (a `src/*` glob skips it).
+- **golangci-lint caches issues by absolute path — clear it after a move.**
+  The first `make lint` post-migration emitted a `can't process results`
+  warning pointing at the old `/workspace/src/internal/api/client.go`. It still
+  reported `0 issues`, but run `golangci-lint cache clean` (and `go clean
+  -cache`) to drop stale entries and get a clean run.
+- **`buildGoModule` `src` should be a `lib.fileset` filter, not `../.`.** Taking
+  the whole repo root as the derivation source makes any `docs/` or ticket
+  change bust the source hash. `lib.fileset.toSource` restricted to
+  `go.mod`/`go.sum`/`cmd`/`internal` keeps rebuilds tied to build inputs.
+  `vendorHash` is unchanged after a pure move (go.mod/go.sum are byte-identical)
+  but must still be confirmed with `nix build`.
+- **Widening the Docker/SBOM scan root pulls in trees you don't want.** With the
+  module at the root, the release SBOM step scans `path: .`, so a root
+  `.syft.yaml` excludes `dist/bin/docs/nix/.github/result`; the Dockerfile
+  copies only `cmd/` and `internal/` (not `COPY . ./`) so `.dockerignore`
+  completeness is not load-bearing for image contents.
+- **Don't forget `.github/dependabot.yml`.** Its gomod `directory:` was pinned
+  to `/src`; leaving it stale silently stops Go dependency PRs after the move.
+  Change it to `/`.
+
+## Exit-code taxonomy migration (dt-7lys, 2026-07-24)
+
+- **`*exec.ExitError` already satisfies `cli.ExitCoder`.** It has `Error()
+  string` and a promoted `ExitCode() int` (from the embedded
+  `*os.ProcessState`).
+  That is why `output.Classify(err, CodeIO)` on a wrapped daemon error is safe:
+  Classify defers to any error already carrying a code, so a dnclient process
+  that ran and exited non-zero keeps its own status N (run's daemon passthrough,
+  design Req 5), while a genuine start failure (`*exec.Error`, no `ExitCode`)
+  gets the I/O class. It is also why `run` must still wrap the daemon error with
+  an explicit `output.ExitError(..., daemonExitCode(...))` — that outer code
+  is
+  what `ResolveExitCode` reads first, and it is where a signal-death `-1` is
+  remapped to `70` instead of a garbage status.
+- **`output.Classify` (defer-to-inner) vs `output.ExitError` (force).** Boundary
+  wrapping uses `Classify` so the innermost assigned class wins as the error
+  bubbles up through `fmt.Errorf("%w")`; `ExitError` is only for the two places
+  that must set a code unconditionally — the `--assert-changed` no-op
+  (`CodeResult`) and the signal exit (`130`/`143`), which overrides the cleanup
+  outcome.
+- **urfave/cli v3 does not inherit `OnUsageError` to subcommands, and
+  `CommandNotFound` cannot set an exit code.** `OnUsageError` is looked up on
+  the
+  command being parsed with no parent walk, so it must be set on the root *and*
+  every subcommand (loop in `newApp`). An unknown command is not a usage error
+  in
+  cli's model — the default help action returns `Exit(msg, 3)`; setting
+  `CommandNotFound` only suppresses that and yields exit 0. The fix is a custom
+  root `Action` that returns a `CodeUsage` (`64`) error when a positional arg is
+  present and shows help (exit 0) when bare.
+- **The signal number is not in the cancelled context.** `signal.NotifyContext`
+  cancels the run context but discards which signal fired, so 130-vs-143 needs a
+  second `signal.Notify` channel captured in `Lifecycle`; both channels receive
+  the signal. Keeping the 128+signum decision in `Lifecycle.finalize` (not
+  `runAndUnenroll`) let the existing signal-shutdown unit tests — which model
+  a
+  signal by cancelling a plain context — stay valid, with new pure-function
+  tests
+  for `finalize`/`signalExitCode`.
+- **Registry-as-data is the drift guard.** `internal/output/exitcodes.go`
+  declares each command's code set; the conformance test asserts every declared
+  code is a known taxonomy value and drives the cheap classes (usage, config,
+  result) through the real CLI, so an improvised literal code fails the build.

@@ -8,7 +8,15 @@ buildGoModule {
   pname = "dn-tool";
   inherit version;
 
-  src = ../src;
+  src = lib.fileset.toSource {
+    root = ../.;
+    fileset = lib.fileset.unions [
+      ../go.mod
+      ../go.sum
+      ../cmd
+      ../internal
+    ];
+  };
   vendorHash = "sha256-3E79DpWwCqn+oKM0Y3TkV0Hx1AhwQmXIPuUoTQQQvHU=";
 
   env.CGO_ENABLED = 0;

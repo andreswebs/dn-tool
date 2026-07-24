@@ -148,7 +148,7 @@ propagation on `ctx.Err() == nil` (design Req 5 acceptance criteria).
 
 `dn-tool`'s enroll runs a remote orphan pre-check (`ListHosts`,
 `GET /v2/hosts?filter.networkID=…`) on **every** enroll, not just under `--force`
-([enroll/state.go](../../src/internal/enroll/state.go)). So the key needs the
+([enroll/state.go](../../internal/enroll/state.go)). So the key needs the
 list/read scope in addition to the obvious ones:
 
 | Scope | Used by |

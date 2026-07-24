@@ -33,3 +33,11 @@
 README.md
 **/.local
 **/.tickets
+**/docs
+**/dist
+**/nix
+flake.lock
+flake.nix
+AGENTS.md
+CLAUDE.md
+UNLICENSE

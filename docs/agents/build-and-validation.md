@@ -1,8 +1,8 @@
 # Build & validation
 
-All commands run from the **project root** via `make`. Go source lives under
-`src/` (module path `github.com/andreswebs/dn-tool`); the `Makefile` `cd`s into
-`src/` for every Go invocation, so you do not need to.
+All commands run from the **project root** via `make`. The Go module
+(`github.com/andreswebs/dn-tool`) lives at the repository root, with `go.mod`,
+`go.sum`, `.golangci.yml`, `cmd/`, and `internal/` directly under it.
 
 ## The quality gate
 

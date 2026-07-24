@@ -2,10 +2,10 @@
 FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS build
 
 WORKDIR /build
-COPY src/go.mod .
-COPY src/go.sum .
+COPY go.mod go.sum ./
 RUN go mod download
-COPY src/ ./
+COPY cmd/ ./cmd/
+COPY internal/ ./internal/
 
 ARG TARGETOS TARGETARCH
 ENV GOOS=$TARGETOS
