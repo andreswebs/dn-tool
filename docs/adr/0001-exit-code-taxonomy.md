@@ -34,7 +34,7 @@ Rules:
 
 ## Consequences
 
-- Consumers, including AI agents and shell scripts, can branch on exit class without parsing output, and knowledge transfers across every tool in the family.
+- Consumers, including AI agents and shell scripts, can branch on exit class without parsing output, and the scheme reuses conventions they already know (`sysexits.h`, `grep`/`diff`).
 
 - `set -e` scripts treat exit 1 (recoverable result) as failure; that is intended, since a result demanding action usually warrants stopping a pipeline. Scripts that only care about hard failures should test for codes 64 and above.
 
