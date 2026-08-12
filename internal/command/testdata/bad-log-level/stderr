@@ -1,0 +1,1 @@
+{"schema_version":1,"ok":false,"error":{"code":"usage_error","message":"invalid command line: invalid value \"chatty\" for flag -log-level: unknown log level \"chatty\", want one of error|warn|info|debug","hint":"check the invocation against `dn-tool <command> --help`"}}

@@ -79,5 +79,5 @@ func buildCreateRequest(cfg *config.Config) (api.CreateHostRequest, error) {
 }
 
 func missingParam(name string) error {
-	return fmt.Errorf("missing required configuration: %s", name)
+	return ErrMissingRequiredConfig.Wrap(fmt.Errorf("%s is not set", name))
 }

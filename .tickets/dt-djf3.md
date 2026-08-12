@@ -1,6 +1,6 @@
 ---
 id: dt-djf3
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-08-12T13:21:42Z
@@ -171,3 +171,19 @@ the stdout write site is `cmd/dn-tool/main.go:48`; if it has, it is the moved
 ## Do not commit
 
 Leave git commits and branching to the repo owner.
+
+## Notes
+
+**2026-08-12T15:10:27Z**
+
+Implemented the ADR 0005 result envelope head and the host_id rename.
+
+internal/output/result.go: added SchemaVersion (moved here from error.go, it now sits beside its owner Head), Head{schema_version, ok}, OKHead(), ResultEnvelope{Head; Result} (one shared envelope per the ticket's decision - all five commands emit the same payload), and EmitJSON(w, v) backed by a marshalLine helper with SetEscapeHTML(false). Result.HostID tag hostId -> host_id. WriteResult keeps its signature and now wraps in ResultEnvelope + EmitJSON, so the envelope is applied at the single emit path and no call site can emit a headless result; internal/command/commands.go withResult was untouched.
+
+Dedup: errorEnvelope now embeds Head instead of redeclaring schema_version/ok, and error.go's marshalEnvelope was replaced by the shared marshalLine (identical behavior, so the stderr envelope and the stdout envelope can no longer drift in framing or escaping). This also resolves dt-nljm's note that WriteResult still HTML-escaped while EmitError did not. Key order and the exact-3-keys assertion in error_test.go still hold: encoding/json inlines an embedded struct at its declaration position.
+
+Tests (TDD, red first via undefined symbols + the changed shape): result_test.go gained an objectKeys helper (ordered top-level keys via json.Decoder tokens + Decode into RawMessage) and TestWriteResultKeyOrder pinning schema_version, ok, action, changed, host_id, network in order; shape/omitempty tests repointed to host_id and the head; added TestWriteResultNoHTMLEscaping, TestOKHead, TestEmitJSONWritesOneLine. New internal/command/result_envelope_test.go drives the real CLI (Run(["write-config", path])) and asserts stdout opens with {"schema_version":1,"ok":true, and carries exactly one trailing newline, so the withResult wiring is covered, not only the type. assert_changed_test.go and both exit-conformance suites pass unchanged.
+
+Docs: design doc 2.8 stdout bullet is now the envelope example with the head and host_id; docs/specs/e2e-testing.md stdout contract row (repadded to keep the table's aligned style, MD060) and the output-streams bullet mention the head, plus a jq -e '.schema_version == 1 and .ok == true' snippet in the Layer 1 harness sketch. CHANGELOG Unreleased/Changed (breaking) gained the head and the hostId -> host_id entries. No defined.net wire tags touched (internal/api is the API's contract, not dn-tool's).
+
+For dt-3xxb: reuse Head/OKHead and EmitJSON; the null-coalescing MarshalJSON still belongs to the schema envelope, which is the first one carrying collections. make build green; verified against the real binary: {"schema_version":1,"ok":true,"action":"write-config","changed":true}.

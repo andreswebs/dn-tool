@@ -139,7 +139,7 @@ func TestLoad_Defaults(t *testing.T) {
 		{"ClientConfigDir", cfg.ClientConfigDir, "/var/lib/defined"},
 		{"ClientSocket", cfg.ClientSocket, "/var/run/defined/dnclient.defined.sock"},
 		{"ClientVersion", cfg.ClientVersion, "latest"},
-		{"LogLevel", cfg.LogLevel, "info"},
+		{"LogLevel", cfg.LogLevel, "warn"},
 		{"ListenPort", cfg.ListenPort, 0},
 		{"Hostname", cfg.Hostname, "host.example"},
 		{"APITimeout", cfg.APITimeout, time.Duration(0)},

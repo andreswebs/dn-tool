@@ -14,11 +14,6 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-// ErrNotEnrolled reports that no local dnclient configuration exists for the
-// network, so the host does not appear to be enrolled. unenroll matches it with
-// errors.Is to distinguish a not-enrolled host from a genuine read failure.
-var ErrNotEnrolled = errors.New("host does not appear to be enrolled")
-
 // ReadHostID returns the remote host identifier dnclient recorded at
 // metadata.host_id in <configRoot>/<networkName>/dnclient.yml. configRoot is
 // injected (default /var/lib/defined) so tests can supply a temp dir.

@@ -1,0 +1,1 @@
+{"schema_version":1,"ok":false,"error":{"code":"api_malformed_response","message":"listing hosts for network net-golden: malformed management API response: decoding list envelope: json: cannot unmarshal string into Go struct field .data of type []json.RawMessage","hint":"the API returned a body dn-tool cannot decode; verify DN_API_URL addresses the defined.net API and retry"}}

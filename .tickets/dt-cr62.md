@@ -1,6 +1,6 @@
 ---
 id: dt-cr62
-status: open
+status: closed
 deps: [dt-w86c]
 links: []
 created: 2026-08-12T13:21:42Z
@@ -273,3 +273,56 @@ envelope chain. Blocks dt-cjgq, dt-o9hi.
 ## Do not commit
 
 Leave git commits and branching to the repo owner.
+
+## Notes
+
+**2026-08-12T15:28:11Z**
+
+Implemented the ADR 0004 leveled posture. What landed:
+
+- New `internal/logctx`: `With`/`From` (context carrier, `From` falls back to
+  `slog.Default()`), `NewRunID`, `ParseLevel` (validated), `NewLogger(w, level,
+  text)`, and `IsTerminalWriter`. `internal/output/log.go` and its test are
+  deleted; their coverage moved into `logctx/logger_test.go`.
+- Flags: `--log-text` removed; `--log-level error|warn|info|debug` (default
+  `warn`, validated via `StringFlag.Validator`) and `--quiet` added. Precedence
+  is quiet > flag > `DN_LOG_LEVEL` (from `deps.Getenv`) > default, resolved in
+  `resolveLogLevel` (internal/command/root.go). A bad flag value exits 64 via
+  the existing OnUsageError path; a bad `DN_LOG_LEVEL` exits 78
+  (`config.ErrConfig`), the deliberate class split.
+- `Deps.IsTerminal func(io.Writer) bool` added (nil means not a terminal); main
+  supplies `logctx.IsTerminalWriter`, which uses `os.ModeCharDevice` rather than
+  `golang.org/x/term`, so go.mod and the Nix vendor hash are untouched. Known
+  gap documented in the function: stderr on /dev/null reads as a terminal.
+- Logger is constructed once in the root `Before` hook, bound to `deps.Err`, and
+  carried on the context; records carry `command` (from `cmd.Args().First()`),
+  `version`, and `run_id` on every command. Both `slog.SetDefault` call sites are
+  gone, including the pre-parse bootstrap: a pre-parse failure is reported by the
+  error envelope alone.
+- Call sites: dninstall install decision, dnclient invocation, and run's dropped
+  shutdown unenroll now use `logctx.From(ctx)`; `internal/run/run.go`'s
+  second (returned-and-logged) error log is deleted. `api.New(cfg, opts...)`
+  gained `api.WithLogger`, so the 20+ existing `New(cfg)` test call sites are
+  unchanged and stay silent; the three production sites pass
+  `api.WithLogger(logctx.From(ctx))`.
+- `config.Config.LogLevel` kept (write-config round-trips it) with its default
+  moved to `logctx.DefaultLevel` ("warn"); config_test's default assertion
+  updated.
+
+Tests: verbosity/precedence/handler-selection/decoration/secret-at-debug in
+internal/command/logging_test.go (replacing the old --log-text test), plus one
+per surviving diagnostic in dnclient, dninstall and run, and a
+"failure is enveloped, never also logged" stream-property test. The dnclient
+code-leak test no longer touches slog.SetDefault.
+
+Run id is 16 lowercase base32 chars from `crypto/rand.Text`, not hex from
+`rand.Read`: hex would force an unreachable errcheck branch and `_ =` is
+forbidden. Fixed width, so golden normalization still needs one substitution
+(relevant to dt-cjgq).
+
+Docs updated: design Req 7 / §2.2 / §2.3 (+ a DN_LOG_LEVEL env-only note) /
+§2.9 / §2.10, docs/specs/e2e-testing.md, README, CHANGELOG (Unreleased,
+breaking), and a learnings entry. `make build` green.
+
+For dt-3xxb: the global flag set the schema projection must report is now
+`--env-file`, `--assert-changed`, `--log-level`, `--quiet`.

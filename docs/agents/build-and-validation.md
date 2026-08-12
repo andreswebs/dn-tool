@@ -2,7 +2,11 @@
 
 All commands run from the **project root** via `make`. The Go module
 (`github.com/andreswebs/dn-tool`) lives at the repository root, with `go.mod`,
-`go.sum`, `.golangci.yml`, `cmd/`, and `internal/` directly under it.
+`go.sum`, `.golangci.yml`, `cmd/`, `internal/`, and `e2e/` directly under it.
+`e2e/` is the exec-level suite (it builds the binary and drives it as a real
+process, per [the e2e plan](../specs/e2e-testing.md)); `make test` runs it with
+everything else, and it skips itself on a host the `install` platform gate
+rejects.
 
 ## The quality gate
 

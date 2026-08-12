@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/andreswebs/dn-tool/internal/api"
+	"github.com/andreswebs/dn-tool/internal/output"
 )
 
 // Behavior 1: local absent + remote present without --force → orphan error with
@@ -43,6 +44,40 @@ func TestEnrollOrphanWithoutForceFailsWithGuidance(t *testing.T) {
 	}
 	if enroller.calls != 0 {
 		t.Errorf("dnclient Enroll called %d times, want 0 without --force", enroller.calls)
+	}
+	// dt-2efx: an orphan is a deployment state the operator resolves, not a
+	// dn-tool bug, so it exits 78 (EX_CONFIG) rather than the 70 it took while
+	// the error carried no class.
+	if !errors.Is(err, ErrOrphanedEnrollment) {
+		t.Errorf("err = %v, want ErrOrphanedEnrollment", err)
+	}
+	if got := output.ExitCodeFor(err); got != output.CodeConfig {
+		t.Errorf("orphan exit code = %d, want %d", got, output.CodeConfig)
+	}
+}
+
+// dt-2efx: the create-time duplicate backstop is the same orphan condition
+// reached through a TOCTOU race, so it carries the same code and exit class.
+func TestEnrollCreateDuplicateIsCodedOrphan(t *testing.T) {
+	root := t.TempDir()
+
+	cfg := validConfig()
+	cfg.Hostname = "host-a"
+
+	apiMock := &scriptedAPI{
+		t: t,
+		createErr: &api.APIError{
+			StatusCode: http.StatusBadRequest,
+			Errors:     []api.APIErrorItem{{Code: "ERR_DUPLICATE_VALUE", Path: "name", Message: "already taken"}},
+		},
+	}
+
+	_, err := Enroll(context.Background(), cfg, Deps{API: apiMock, ConfigRoot: root, DNClient: &recordingEnroller{t: t}})
+	if !errors.Is(err, ErrOrphanedEnrollment) {
+		t.Fatalf("err = %v, want ErrOrphanedEnrollment", err)
+	}
+	if got := output.ExitCodeFor(err); got != output.CodeConfig {
+		t.Errorf("duplicate-orphan exit code = %d, want %d", got, output.CodeConfig)
 	}
 }
 

@@ -18,9 +18,11 @@ reimplements Nebula and never replaces `dnclient`.
 | `unenroll`     | Delete the remote host record and remove the local config.                   |
 | `run`          | `install` → `enroll` → exec `dnclient run`; unenroll on `SIGTERM`/`SIGINT`.  |
 | `write-config` | Persist the current environment config to a `0600` key-value file.           |
+| `schema`       | Print the command, exit-code and error surface as one JSON object.           |
 
 Global flags: `--env-file <path>`, `--force` (on `enroll`), `--assert-changed`,
-`--log-text`. See the [command surface](docs/dn-tool-design.md#22-command-surface)
+`--log-level error|warn|info|debug` (default `warn`), `--quiet`. See the
+[command surface](docs/dn-tool-design.md#22-command-surface)
 in the design document for details.
 
 ## Configuration

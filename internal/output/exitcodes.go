@@ -24,6 +24,10 @@ var CommandExitCodes = map[string][]int{
 		CodeUsage, CodeData, CodeUnavailable, CodeInternal, CodeIO, CodeConfig,
 		CodeSIGINT, CodeSIGTERM,
 	},
+	// schema only projects declarations already in memory: it can be misused
+	// (64), can fail writing its envelope to stdout (74), and carries the
+	// unclassified-bug fallback (70). It reaches neither the API nor the config.
+	"schema": {CodeOK, CodeUsage, CodeInternal, CodeIO},
 	// The root command dispatches to subcommands; on its own it either prints
 	// help (0), rejects an unknown command or a bad global flag (64), or falls
 	// back to the unclassified-bug code (70).

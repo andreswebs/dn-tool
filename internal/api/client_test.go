@@ -1,7 +1,9 @@
 package api
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"log/slog"
@@ -11,6 +13,8 @@ import (
 	"time"
 
 	"github.com/andreswebs/dn-tool/internal/config"
+	"github.com/andreswebs/dn-tool/internal/output"
+	"github.com/hashicorp/go-retryablehttp"
 )
 
 // fastClient builds a *Client whose transport retries with negligible backoff,
@@ -378,7 +382,7 @@ func TestRetryBudgetExhaustionSurfacesError(t *testing.T) {
 }
 
 func TestNewRetryableClientWiresPolicyAndLogger(t *testing.T) {
-	withLogger := newRetryableClient(slog.Default(), 4, time.Second, 30*time.Second)
+	withLogger := newRetryableClient(slog.New(slog.DiscardHandler), 4, time.Second, 30*time.Second)
 	if withLogger.CheckRetry == nil {
 		t.Fatal("CheckRetry not wired")
 	}
@@ -389,5 +393,123 @@ func TestNewRetryableClientWiresPolicyAndLogger(t *testing.T) {
 	noLogger := newRetryableClient(nil, 4, time.Second, 30*time.Second)
 	if noLogger.Logger != nil {
 		t.Fatalf("Logger = %v, want nil when no slog logger is provided", noLogger.Logger)
+	}
+}
+
+// dt-2efx: a 2xx whose body does not match the documented envelope is bad data
+// received, so it exits 65 (EX_DATAERR) rather than the 70 it took while the
+// decode error carried no class. 70 stays reserved for dn-tool's own faults —
+// encoding the request body, building the request.
+func TestDoMalformedSuccessBodyIsDataError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"data": not json`))
+	}))
+	defer srv.Close()
+
+	var out struct{}
+	err := fastClient(srv.URL, 0).do(context.Background(), http.MethodGet, "/v2/hosts", nil, &out)
+	if !errors.Is(err, ErrAPIMalformedResponse) {
+		t.Fatalf("err = %v, want ErrAPIMalformedResponse", err)
+	}
+	if got := output.ExitCodeFor(err); got != output.CodeData {
+		t.Errorf("exit code = %d, want %d", got, output.CodeData)
+	}
+}
+
+// The list walker decodes its own envelope, so a malformed list page carries the
+// same code as a malformed single-object response.
+func TestListAllMalformedEnvelopeIsDataError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"data": [ broken`))
+	}))
+	defer srv.Close()
+
+	err := fastClient(srv.URL, 0).listAll(context.Background(), "/v2/hosts", nil, func(json.RawMessage) error { return nil })
+	if !errors.Is(err, ErrAPIMalformedResponse) {
+		t.Fatalf("err = %v, want ErrAPIMalformedResponse", err)
+	}
+	if got := output.ExitCodeFor(err); got != output.CodeData {
+		t.Errorf("exit code = %d, want %d", got, output.CodeData)
+	}
+}
+
+// The API classes reach the boundary as codes too: a 4xx is ErrAPIRejected
+// (EX_DATAERR, 65) and the typed *APIError stays reachable through it, so
+// enroll's duplicate-name recovery still branches on the static code/path.
+func TestAPIClientErrorIsCodedAndKeepsTheTypedError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write([]byte(`{"errors":[{"code":"ERR_DUPLICATE_VALUE","path":"name","message":"taken"}]}`))
+	}))
+	defer srv.Close()
+
+	err := fastClient(srv.URL, 0).do(context.Background(), http.MethodGet, "/v2/hosts", nil, nil)
+	if !errors.Is(err, ErrAPIRejected) {
+		t.Fatalf("err = %v, want ErrAPIRejected", err)
+	}
+	if got := output.ExitCodeFor(err); got != output.CodeData {
+		t.Errorf("exit code = %d, want %d", got, output.CodeData)
+	}
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatal("the typed *APIError must stay reachable through the coded error")
+	}
+	if !apiErr.Has("ERR_DUPLICATE_VALUE", "name") {
+		t.Errorf("envelope lost: %+v", apiErr)
+	}
+}
+
+// A 5xx is ErrAPIUnavailable (EX_UNAVAILABLE, 69) whether it surfaces from the
+// status branch or from the retrying transport giving up on it.
+func TestAPIServerErrorIsCodedUnavailable(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusInternalServerError)
+	}))
+	defer srv.Close()
+
+	err := fastClient(srv.URL, 1).do(context.Background(), http.MethodGet, "/v2/hosts", nil, nil)
+	if !errors.Is(err, ErrAPIUnavailable) {
+		t.Fatalf("err = %v, want ErrAPIUnavailable", err)
+	}
+	if got := output.ExitCodeFor(err); got != output.CodeUnavailable {
+		t.Errorf("exit code = %d, want %d", got, output.CodeUnavailable)
+	}
+}
+
+// dt-cr62: the transport's logger is injected by the orchestration layer instead
+// of read from slog's process-global default, so nothing in the tree depends on
+// slog.SetDefault.
+func TestWithLogger_RoutesTransportChatterToTheInjectedLogger(t *testing.T) {
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write([]byte(`{"data":{}}`))
+	}))
+	defer srv.Close()
+
+	client := New(&config.Config{APIURL: srv.URL}, WithLogger(logger))
+	var out struct{}
+	if err := client.do(context.Background(), http.MethodGet, "/v1/thing", nil, &out); err != nil {
+		t.Fatalf("do: %v", err)
+	}
+
+	if buf.Len() == 0 {
+		t.Error("the injected logger received no records, want the transport's chatter")
+	}
+}
+
+// A client built without the option stays silent, which is what every other test
+// in this file relies on, and what keeps a library from writing to a stream it
+// was never handed.
+func TestNew_WithoutLoggerIsSilent(t *testing.T) {
+	client := New(&config.Config{APIURL: "https://example.invalid"})
+
+	transport, ok := client.httpClient.Transport.(*retryablehttp.RoundTripper)
+	if !ok {
+		t.Fatalf("transport = %T, want *retryablehttp.RoundTripper", client.httpClient.Transport)
+	}
+	if transport.Client.Logger != nil {
+		t.Errorf("Logger = %v, want nil so a client built without WithLogger stays silent", transport.Client.Logger)
 	}
 }

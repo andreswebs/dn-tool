@@ -1,0 +1,1 @@
+{"schema_version":1,"ok":false,"error":{"code":"file_io_error","message":"local file operation failed: creating config file $TMP_DIR/absent-dir/dn.env: open $TMP_DIR/absent-dir/dn.env: no such file or directory","hint":"check the path's permissions and that the filesystem is writable and has free space"}}

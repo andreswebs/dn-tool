@@ -1,0 +1,1 @@
+{"schema_version":1,"ok":false,"error":{"code":"missing_argument","message":"missing required argument: write-config requires a target file path","hint":"supply the argument named in the message; see `dn-tool <command> --help` for the argument list"}}

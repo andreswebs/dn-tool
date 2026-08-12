@@ -1,8 +1,8 @@
 ---
 id: dt-cjgq
-status: open
+status: closed
 deps: [dt-w86c, dt-djf3, dt-nljm, dt-3xxb, dt-cr62]
-links: []
+links: [dt-nljm, dt-2efx, dt-nrq1, dt-xyp4]
 created: 2026-08-12T13:21:43Z
 type: task
 priority: 2
@@ -166,3 +166,21 @@ stderr). Blocks dt-o9hi.
 ## Do not commit
 
 Leave git commits and branching to the repo owner.
+
+## Notes
+
+**2026-08-12T15:48:14Z**
+
+Golden-triple harness added (ADR 0006), all green under make build and make test-race.
+
+Layout: internal/command/golden_test.go (harness) + golden_scenarios_test.go (24 scenarios) + testdata/<scenario>/{stdout,stderr,exit}. package command_test, so it touches only command.Run/command.Deps — framework-blind by construction. Regenerate: go test ./internal/command -update.
+
+Coverage: 0, 1, 64, 65, 69, 74, 78 each exercised through the CLI, including the classes that were previously only asserted on constructed errors (65 via API 4xx / malformed body / checksum mismatch, 69 via API 5xx, 74 via an unwritable path and a dnclient exiting 3 with details.exit_status). Every scenario asserts registry membership (output.CommandExitCodes) plus the ADR 0005 stream split (empty stdout on failure; result envelope still on stdout for the --assert-changed no-op at exit 1).
+
+Exemptions are explicit in exemptFromCoverage: 70 (no CLI invocation yields an unclassified error; covered by TestExitCode_EmitsErrorEnvelopePerExitClass), 130/143 (internal/run/signal_test.go), and the daemon passthrough (internal/run/run_test.go). TestMain fails on any other unexercised declared code — verified by temporarily dropping the 69 scenario. The check is skipped under -update or a -run filter.
+
+Determinism: fixtures mask temp dirs, the httptest URL, the build version, run_id and record timestamps; TestGolden_IsDeterministic runs each scenario twice and TestGolden_NoVolatileValuesInGoldens re-reads the committed files.
+
+Watch-outs for the next person: DN_HOSTNAME must stay pinned in enroll fixtures (unset falls back to the system hostname, which lands in goldens); the API-unavailable scenario relies on DN_API_TIMEOUT=500ms cutting the 1s retry backoff, so raising that env value makes the run slow and the attempt count unstable; install-backed scenarios (install*, run) skip on a non-Linux host via requireLinuxHost.
+
+Docs: docs/specs/e2e-testing.md gained a 'Layer 0b' section with the per-layer exit-code ownership table; learnings.md has the normalization notes. No CHANGELOG entry — no consumer-visible change. Nothing committed; the working tree is left for the repo owner. Only dt-o9hi remains in the epic.

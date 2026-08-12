@@ -1,6 +1,6 @@
 ---
 id: dt-uq9d
-status: open
+status: closed
 deps: [dt-w86c, dt-2efx]
 links: []
 created: 2026-08-12T13:21:42Z
@@ -159,3 +159,20 @@ Depends on dt-w86c (the delegate owns the boundary) and dt-2efx (needs
 ## Do not commit
 
 Leave git commits and branching to the repo owner.
+
+## Notes
+
+**2026-08-12T14:54:32Z**
+
+Replaced the cli.ExitCoder exit boundary with output.ExitCodeFor (resolves terr.Coded via errors.As; unclassified -> CodeInternal 70). internal/output no longer imports urfave/cli: exitError, ExitError, Classify and ResolveExitCode are deleted; the ADR 0001 constants are untouched. grep -rn urfave internal/ now hits only internal/command, and HandleExitCoder/OsExiter/exitWithError appear nowhere in the tree.
+
+internal/command/run.go: exitCode() now calls output.ExitCodeFor and prints err.Error() directly; the local structural exitCoder interface is gone. Note the one deliberate stderr difference: a plain fmt.Errorf wrapper around a coded error now prints the full outer message instead of the innermost coder's message (the old cli.HandleExitCoder shape, which silently dropped outer context). dt-nljm replaces this rendering with output.EmitError and the JSON envelope; exit codes are unchanged either way.
+
+Outermost-wins is now asserted directly, not assumed:
+- internal/output/exit_test.go TestExitCodeFor_OutermostCodedErrorWins
+- internal/run/signal_test.go TestFinalize_SignalCodeOverridesInnerClassCode (both signals, over an inner 74)
+- internal/run/run_test.go TestDaemonPassthroughWrapperOverridesInnerClassCode (N over the inner dnclient_failed 74)
+
+Gotcha for the next ticket: ExitCodeFor(nil) is 70, not 0 - nil->CodeOK is the boundary's job (command.Run returns 0 before consulting the taxonomy). Test call sites that used ResolveExitCode(nil)==CodeOK as a proxy for success were rewritten to assert err == nil (internal/enroll/state_test.go, internal/run/run_test.go x2). All other test call sites are a mechanical ResolveExitCode -> ExitCodeFor rename, with the ExitError/Classify fixtures rebuilt on terr (terr.Newf, sentinel .Wrap, run's newExitErr).
+
+Also corrected the stale comment at internal/dnclient/client.go:73-80, which claimed a bare *exec.ExitError would be honored by the boundary - it no longer satisfies terr.Coded, so it falls back to 70. No CHANGELOG entry: no consumer-visible behavior changed. make build green.

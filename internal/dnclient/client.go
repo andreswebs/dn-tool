@@ -7,13 +7,13 @@ package dnclient
 
 import (
 	"context"
+	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/exec"
 	"path/filepath"
 
-	"github.com/andreswebs/dn-tool/internal/output"
+	"github.com/andreswebs/dn-tool/internal/logctx"
 )
 
 // binaryName is the dnclient executable's file name within the bin dir.
@@ -66,17 +66,25 @@ func (c *execClient) Run(ctx context.Context, args ...string) error {
 // contract (design §2.8). action names the operation for diagnostics; the
 // argument list, which may carry the enrollment code, is never logged.
 func (c *execClient) exec(ctx context.Context, action string, args ...string) error {
-	slog.Default().Debug("running dnclient", "action", action, "bin", c.binPath)
+	logctx.From(ctx).Debug("running dnclient", "action", action, "bin", c.binPath)
 	cmd := exec.CommandContext(ctx, c.binPath, args...)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
-		// A failure to start the subprocess (binary missing, not executable) is a
-		// local I/O error (EX_IOERR, ADR 0001). A process that ran and exited
-		// non-zero yields an *exec.ExitError, which already satisfies
-		// cli.ExitCoder via its ExitCode(); Classify defers to that so run can
-		// still propagate the daemon's own exit status N (design Req 5).
-		return output.Classify(fmt.Errorf("dnclient %s failed: %w", action, err), output.CodeIO)
+		// Both failure modes — the subprocess never started (binary missing, not
+		// executable) and the child ran and exited non-zero — are
+		// ErrDNClientFailed (EX_IOERR, ADR 0001). Classifying here is what keeps
+		// the child's own status out of dn-tool's exit code — a code no command
+		// declares — and leaves it unclassified for nothing but the CodeInternal
+		// fallback otherwise. When the child ran, its status travels as
+		// structured detail instead, where a consumer can read it without it
+		// displacing dn-tool's own classification.
+		e := ErrDNClientFailed.Wrap(fmt.Errorf("dnclient %s: %w", action, err))
+		var exitErr *exec.ExitError
+		if errors.As(err, &exitErr) {
+			e = e.WithDetails(map[string]any{"exit_status": exitErr.ExitCode()})
+		}
+		return e
 	}
 	return nil
 }

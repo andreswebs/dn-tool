@@ -3,6 +3,230 @@
 Running notes of non-obvious problems solved and decisions worth carrying
 forward. Newest first.
 
+## A non-zero exit is not a failure (dt-nrq1, 2026-08-12)
+
+- **The exit boundary had one question and asked the wrong one.** It emitted an
+  error envelope for every non-nil error, which made a graceful container stop
+  and an `--assert-changed` no-op both report `ok:false` — the no-op alongside
+  its own `ok:true` result on stdout, about the same invocation. The fix is a
+  second kind of coded value: `terr.NewStatus` declares a non-failure whose exit
+  code is the whole contract, and the boundary skips the envelope for it. The
+  default stays failure, so an unclassified error is still loud.
+- **A numeric predicate cannot express this.** `signal_shutdown` is `130`/`143`,
+  above the sysexits failure range yet not a failure; `daemon_exit` propagates
+  the daemon's own status, which may be any value and *is* a failure. Only the
+  error can say which kind it is, which is why the marker is an interface the
+  value implements rather than a range check at the boundary.
+- **A per-instance wrapper must forward the kind.** `run`'s `exitErr` computes a
+  per-invocation exit code and delegates `Code`/`Hint`/`Unwrap` to its class
+  sentinel; forgetting `NonFailure` there would have let the boundary read the
+  wrapped cause's classification instead and print an envelope for a clean stop.
+- **Suppressing an envelope can silence a real failure, so check what depended
+  on it.** An unenroll failure during a signalled shutdown used to reach the
+  operator only through that envelope, while the signal code overrode its exit
+  status. With the envelope gone it had to become a log record — which is what
+  design Requirement 5 specified all along ("is logged … but does not change the
+  signal exit code").
+- **Statuses are not errors in the self-description either.** `schema` now
+  reports them in a `statuses` list parallel to `errors`, each with its code,
+  exit code and meaning, so the code-to-meaning mapping survives without
+  claiming a no-op was a failure. The same split lets a status omit its hint: a
+  graceful stop has nothing to remediate, and ADR 0002 reserves the hint for
+  remediation, not for restating an exit-code mapping (`daemon_exit`'s hint was
+  rewritten for the same reason).
+- **The gap was in the harness, not only in the code.** The golden suite pinned
+  the wrong stderr and read it as correct, because `assertStreamContract`
+  demanded an error envelope for every non-zero exit. It now asserts the
+  *absence* of one for the status codes. The signal case is unreachable in
+  process at all, so the exec-level suite in `e2e/` was added for it: it builds
+  the binary, drives the real lifecycle against a fake API and a `dnclient`
+  stand-in, and sends a real SIGTERM/SIGINT. Verified by re-introducing the
+  defect and watching it go red.
+
+## Platform gates belong to the fixture, not the scenario (dt-xyp4, 2026-08-12)
+
+- **A guard every caller needs by definition should not be a call every caller
+  remembers.** `run` installs before it enrolls, so its golden scenario inherits
+  `install`'s Linux-only gate, but `runSuccess` was the one install-backed
+  scenario that never called `requireLinuxHost`. That single omission made
+  `make test` red on macOS while every CI run stayed green. The fix moves the
+  call into `installFixture`, the one function every install-backed scenario
+  goes through, so the choice no longer exists.
+- **Skipping the scenario is only half the fix, and the other half fails
+  later.** With the skip in place, the four install-backed scenarios stop
+  running on macOS, and `CodeResult` (1) is produced in process by exactly one
+  of them. The `TestMain` coverage check then failed the package for an
+  unexercised declared code: a red gate that appeared only *because* the first
+  half worked, since a failing `TestGolden` suppressed the check (it runs when
+  `m.Run()` returned 0). `coverageReport` now separates the two verdicts: a code
+  no scenario covers is still a failure, while a code left unexercised because
+  the host skipped its scenario is printed as a note naming the codes and the
+  scenarios. Silence would have read as full coverage on a host that had less.
+- **Injecting the host platform is what makes the skip testable from Linux.**
+  The gate reads package-level `hostGOOS`/`hostGOARCH` rather than
+  `runtime.GOOS` directly, so a Linux run can pin `darwin/arm64` and assert that
+  every scenario reaching the install path skips. The probe derives that list
+  from `installFixture` setting `fixture.installBacked`, not from a hardcoded
+  list the next scenario would fall off, which is the same failure mode as the
+  one being fixed.
+  A companion test pins the gate as platform-*conditional* in both directions,
+  because an unconditional skip would drop these scenarios from every CI run and
+  look like coverage.
+
+## Closing an epic is a verification, not a formality (dt-69kx, 2026-08-12)
+
+- **The epic-terminal action is to re-derive the acceptance bullets from the
+  built artifact, not from the children's notes.** Every child of [[dt-69kx]]
+  reported green, but "all children closed" only proves each ticket met its own
+  scope. The nine consumer-visible changes the epic promised span five packages
+  and only compose at the binary, so the close ran the promised invocations
+  against `bin/dn-tool-*` and read the actual exit codes and envelopes back.
+- **The negative claims are the ones worth grepping, and the grep needs an
+  exclusion list.** `slog.SetDefault`, `hostId`, `output.Classify` and
+  `cli.ExitCoder` are all "this must no longer exist" assertions. A naive
+  `grep -rn` over the repo returns dozens of hits and reads as a failure, because
+  `.tickets/`, `.local/planning/` and `docs/research/` are historical records
+  that are *supposed* to still name the removed thing. Excluding them left four
+  surviving hits, all deliberate: regression comments that exist precisely to
+  say why the construct was removed.
+- **A test that documents a removal belongs next to the diagnostic it protects.**
+  The surviving `ExitCoder` mention is a comment at
+  `internal/dnclient/client_test.go:131` recording that `*exec.ExitError` used to
+  satisfy the old boundary interface. That comment is the durable form of the
+  epic's defect 1 — the ticket text will be archived, the test will not.
+- **Verify where the guard tests live now, not where the epic said they lived.**
+  The epic pinned `cmd/dn-tool/exit_conformance_test.go` as an ADR 0001 guard;
+  [[dt-w86c]] had since moved it to `internal/command/` along with the whole root
+  command. Checking the path rather than running the suite would have read as a
+  missing guard.
+
+## The residual doc sweep: what a ticket-owned inventory misses (dt-o9hi, 2026-08-12)
+
+- **A "each doc edit rides with the code ticket that changes it" rule needs a
+  residual pass, and the residual is not only the rows nobody claimed.** The
+  [[dt-69kx]] inventory listed 19 contradictions and assigned 15 of them to code
+  tickets. Re-running the grep sweep after all of them landed still turned up
+  two fresh ones the original scan could not have found, because they were not
+  stale when it ran: [[dt-3xxb]] added a sixth command, which made every "the
+  five commands" sentence wrong the moment it merged. An inventory is a
+  snapshot of contradictions that already exist; the sweep is what catches the
+  ones the epic itself created.
+- **Count words are a contradiction class worth grepping for.** `five`,
+  `all five`, and `exactly the five commands` outlived the change that made them
+  false, and none of them contain any of the terms the sweep was built around
+  (`log-text`, `hostId`, `exit 2`). Prose that encodes a cardinality ages the
+  same way a hard-coded number does.
+- **Not every stale count is a wrong count.** `ResultEnvelope`'s "all five
+  commands share" is still literally true: `schema` emits `SchemaEnvelope`, so
+  exactly five commands share the result envelope. The fix was to say which five
+  and why, not to renumber to six. Reading a count as stale without checking
+  what it counts trades one wrong sentence for another.
+- **`git show HEAD:<path>` is the honest markdownlint baseline.** With no
+  repo-local config and no `~/.markdownlint.yaml` present, the default 80-column
+  MD013 fires on 100-plus pre-existing lines, which drowns any real finding.
+  Linting the HEAD copies of the touched files into a diffable list first made
+  the one genuine regression visible: a single MD060.
+- **Lengthening a link path breaks table alignment.** Repointing
+  `](adr/0001-…)` to `](../adr/0001-…)` grew that row by three characters past
+  its neighbours and tripped MD060 on an aligned table. Repadding is per table,
+  not per row: all 13 rows go to the new width and the separator row is rebuilt
+  as pure dashes, since appending the pad after its trailing space leaves
+  `--- ---`, which MD060 accepts but reads as damage.
+- **Moving a document invalidates its links in both directions, and the ticket
+  will under-count them.** [[dt-o9hi]] named one broken link from the
+  `docs/` to `docs/specs/` move; there were six. `./research/…` and
+  `./dn-tool-design.md` are as broken as `adr/…` when the file drops a level,
+  and an explicit-`./` prefix reads as deliberate, which is exactly why it
+  survives review. A resolver over every relative link in every tracked
+  markdown file costs one shell loop and is the only check that generalizes.
+
+## logctx: the level flag validates itself, the handler picks itself, and the logger rides the context (dt-cr62, 2026-08-12)
+
+- **A `StringFlag.Validator` is the whole of level validation, and it lands on
+  exit 64 for free.** urfave calls the validator inside `Set`, so a bad
+  `--log-level` surfaces as a parse error, which reaches the already-wired
+  `OnUsageError` and maps to `ErrUsage`. The rendered message is
+  `invalid command line: invalid value "bogus" for flag -log-level: unknown log
+  level "bogus", want one of error|warn|info|debug`, so the accepted set has to be
+  in the validator's error text: nothing else prints it.
+- **A bad `DN_LOG_LEVEL` is a different class from a bad `--log-level`.** The
+  flag is a command-line fault (64); the variable is a configuration fault
+  (`config.ErrConfig`, 78). Both are already declared for every command in
+  `CommandExitCodes`, so the split needed no registry change. Silently accepting
+  garbage, which `parseLevel` used to do, is the one option ADR 0004 rules out.
+- **`cmd.IsSet` is what makes flag-over-environment precedence work with a flag
+  default.** `--log-level` carries `Value: logctx.DefaultLevel`, so
+  `cmd.String("log-level")` is never empty and cannot distinguish "defaulted"
+  from "explicitly warn". Precedence therefore reads `IsSet` first, then
+  `deps.Getenv("DN_LOG_LEVEL")`, then the default.
+- **Terminal detection needs no dependency.** `w.(*os.File)` plus
+  `Stat().Mode()&os.ModeCharDevice` covers every case that matters (buffer, pipe,
+  redirected file), so `golang.org/x/term` stays out of `go.mod` and the Nix
+  vendor hash is untouched. The known gap is character devices that are not
+  terminals: stderr redirected to `/dev/null` reads as a terminal and gets text
+  records nobody reads.
+- **`crypto/rand.Text` avoids an unreachable error branch.** `rand.Read` returns
+  an error that cannot occur, which `errcheck` still demands be handled, and the
+  house rule forbids `_ =`. `strings.ToLower(rand.Text()[:16])` is error-free, so
+  the run id is base32 rather than the hex the plan sketched: a fixed width is
+  what golden normalization needs, not a particular alphabet.
+- **The root `Before` hook is where the logger is built, and `cmd.Args().First()`
+  is the only source for the `command` attribute there.** Before runs ahead of
+  subcommand dispatch, so the invoked name is read off the remaining arguments; a
+  bare invocation reports `dn-tool`, matching the registry key.
+- **Removing `slog.SetDefault` silences every `slog.Default()` diagnostic unless
+  each one is migrated deliberately.** Four survived as `logctx.From(ctx)`
+  (install decision, dnclient invocation, the dropped shutdown unenroll, and the
+  API transport via `api.WithLogger`); one was deleted, because
+  `internal/run/run.go` logged an error it also returned, and once the envelope
+  carries the message that is duplicate envelope content. Each survivor now has a
+  test that drives its path with an injected logger, which is the only thing that
+  would catch a silent regression.
+- **A functional option kept 20+ `api.New(cfg)` test call sites untouched.**
+  `New(cfg, opts ...Option)` with `WithLogger` injects the transport logger from
+  the orchestration layer while a bare `New(cfg)` stays silent, which is exactly
+  what `newRetryableClient`'s nil-logger branch already supported.
+- **The failure-reported-once rule is testable as a stream property.** For a
+  failing invocation at `--log-level debug`, every line on stderr is parsed and
+  any object carrying a `level` key fails the test: the error envelope has no
+  such key, so "enveloped, never also logged" is asserted without matching
+  message text.
+
+## internal/command — the delegate move is only free because urfave resolves the exit handler at the root (dt-w86c, 2026-08-12)
+
+- **`neutralize` needs one field on one command, not a tree walk.**
+  `Command.handleExitCoder` recurses to the parent before consulting
+  `ExitErrHandler`, so setting a no-op handler on the root disables the
+  framework's printing and `os.Exit` for the whole tree. This is the exact
+  opposite of `OnUsageError`, which is looked up on the command being parsed
+  with no parent walk and therefore must be set on every subcommand. Two
+  neighbouring fields, two opposite resolution rules — assuming either one
+  behaves like the other yields a silently broken boundary (either a subcommand
+  that still exits inside `Run`, or usage errors that miss the 64 mapping).
+- **The old boundary printed the *innermost* coded error, not the wrapper.**
+  `cli.HandleExitCoder` type-asserts the value it is handed, and `exitWithError`
+  handed it whatever `errors.As` found, so `dnclient enroll failed: exit status
+  3` reached the user as bare `exit status 3`. The replacement in
+  `internal/command/run.go` reproduces that selection deliberately, to keep this
+  ticket a pure move; dt-2efx is where the discarded context is fixed.
+- **The framework-free contract survives without importing the framework for
+  the ExitCoder check.** Declaring a local structural `interface { error;
+  ExitCode() int }` in `run.go` matches both `cli.ExitCoder` and
+  `output.ExitError` values, so the exit boundary classifies by identity with no
+  `urfave` import in the contract file (ADR 0003's no-leak rule).
+- **`Deps.Getenv` is what makes the CLI tests hermetic, and a source-level guard
+  test is what keeps it that way.** Once configuration flows from an injected
+  `Getenv`, the end-to-end tests drop `t.Setenv` entirely (no process-global
+  mutation, so they parallelize later for free). Nothing behavioral catches a
+  future `os.Getenv` creeping back in, so `conformance_test.go` scans the
+  package's own non-test sources for `os.Getenv`/`os.Args`/`os.Std*` — the cheap
+  drift test ADR 0003 asks for, and it fails on a real violation.
+- **A zero `Deps` must be inert, not fatal.** `withDefaults` maps unset fields to
+  `io.Discard` / an empty reader / an empty environment. Without it, a caller
+  that only wants the exit code nil-panics deep inside a command, and — worse —
+  a nil `Writer` makes urfave fall back to the *real* `os.Stdout`, quietly
+  reintroducing the process coupling the package exists to remove.
+
 ## write-config — 0600 is umask-independent by construction; the writer lives in config returning error, not output.Result (dt-meg1, 2026-06-06)
 
 - **The SEC2 fix is structural and simpler than it looks: a single
@@ -1464,7 +1688,7 @@ w.Write(...)` in httptest handlers — breaking `make validate` and contradictin
 - **urfave/cli is v3** (`github.com/urfave/cli/v3` v3.9.0). v3 has no `App`
   type — the root program is a `*cli.Command`, subcommands nest in
   `Commands`, and handlers are `func(context.Context, *cli.Command) error`.
-  The [reference](research/urfave-cli-reference.md) v2→v3 table is accurate;
+  The [reference](../research/urfave-cli-reference.md) v2→v3 table is accurate;
   follow it rather than v2 idioms found online.
 - **`Command.Run` does not call `os.Exit`.** It returns the Action's error.
   `cli.HandleExitCoder` only acts on errors implementing `ExitCoder` (it
@@ -1555,3 +1779,206 @@ w.Write(...)` in httptest handlers — breaking `make validate` and contradictin
   declares each command's code set; the conformance test asserts every declared
   code is a known taxonomy value and drives the cheap classes (usage, config,
   result) through the real CLI, so an improvised literal code fails the build.
+
+## Coded errors: internal/terr (dt-2efx, 2026-08-12)
+
+- **`Classify`'s deferral was a silent no-op for `dnclient` failures.** The
+  earlier taxonomy learning (above) reasoned that deferring to any error already
+  carrying a code kept `run`'s daemon passthrough working. It did — and it also
+  meant `output.Classify(err, CodeIO)` never attached a class when the child ran
+  and exited non-zero, because `*exec.ExitError` promotes `ExitCode()` from its
+  embedded `*os.ProcessState` and therefore already satisfies `cli.ExitCoder`.
+  So `enroll` exited with the child's status (a code no command declared) and the
+  boundary printed the innermost coder's message, dropping the
+  `"dnclient enroll"` context. The fix is to branch on the failure mode
+  explicitly at the raising site and carry the child's status as structured
+  detail (`details.exit_status`) rather than in the process exit code. Deferral
+  is fine as a boundary policy; relying on it to classify is not.
+- **Classify at the boundary, code at the origin.** With coded sentinels the
+  ordering rule inverts cleanly: the *outermost* coded error wins (`errors.As`
+  walks outermost-first), and each site raises its own class instead of leaving
+  an outer layer to guess one. `run` therefore keeps its passthrough by wrapping
+  the daemon error at its own outermost layer, and the inner `dnclient_failed`
+  class is what every other caller sees.
+- **`Is` by code is what makes copy-on-write sentinels work.** `Wrap` and
+  `WithDetails` return copies, so pointer identity cannot be the match; `E.Is`
+  compares codes, which keeps `errors.Is(copy, sentinel)` true through any amount
+  of `%w` wrapping. The consequence to remember: two sentinels must never share
+  a code, which is why `terr.New` panics on a duplicate at init.
+- **A per-invocation exit code needs a delegating type, not a mutable
+  sentinel.** `run` has two (130/143 from the signal, the daemon's N), so
+  `run.exitErr` delegates `Code`/`Hint`/`Is` to a class sentinel and overrides
+  `ExitCode()`. The class sentinels keep the variance honest in their hints
+  instead of advertising a single misleading number.
+- **A sentinel raised by several packages needs one home, not one per package.**
+  `file_io_error` is raised by `config`, `dninstall`, `unenroll` and the result
+  writer; it lives in `internal/config` (the lowest package in the import graph)
+  so one machine code covers one meaning. Per-package sentinel files are the
+  default, not an invariant.
+- **errcheck sees `terr.New` as an unchecked error.** `New` returns `*E`, which
+  is an error, so a bare `New(...)` in a test (for example the duplicate-code
+  panic case) fails lint. Use the return value in an assertion rather than
+  silencing it with `_ =`.
+
+## The framework-free exit boundary: `output.ExitCodeFor` (dt-uq9d, 2026-08-12)
+
+- **Deleting `cli.ExitCoder` from the boundary is what actually removes the
+  `*exec.ExitError` trap.** `ExitCodeFor` resolves `terr.Coded` (`Code`,
+  `ExitCode`, `Hint`), which a raw `*exec.ExitError` does not satisfy, so a
+  subprocess status can no longer become dn-tool's exit code by accident: an
+  unclassified child failure now lands on the loud `CodeInternal` fallback
+  instead. The structural `error + ExitCode() int` interface would have kept the
+  trap alive under a different name.
+- **`ExitCodeFor(nil)` is 70, not 0.** The mapping answers "which code does this
+  failure carry", and `errors.As` on a nil error matches nothing. The `nil →
+  CodeOK` decision belongs to the one caller that can observe success — the
+  boundary in `internal/command`, which returns 0 before consulting the taxonomy.
+  Tests that used to write `ResolveExitCode(nil) == CodeOK` as a stand-in for
+  "this path succeeded" say `err != nil` instead; the indirection was hiding the
+  assertion.
+- **Outermost-wins is now asserted, not assumed.** `run`'s signal override
+  (130/143 over an inner class) and its daemon passthrough (status N over the
+  inner `dnclient_failed` 74) both depend on `errors.As` walking the chain
+  outermost-first. Both are covered by direct boundary-level tests, so the
+  invariant fails loudly if the resolution order is ever reversed, rather than
+  showing up as a wrong process exit code in a container.
+
+## The stderr error envelope (dt-nljm, 2026-08-12)
+
+- **The envelope is where the coded errors finally pay off, and where a missing
+  classification becomes visible.** `output.EmitError` reads `terr.Coded` for
+  the code and hint and `terr.Detailed` for the payload, and falls back to
+  `internal_error` — the same pairing as `ExitCodeFor`'s `CodeInternal`
+  fallback, so an unclassified failure is loud in both channels at once,
+  instead of quietly rendering as a class it does not belong to.
+- **A bare invocation could not stay a help request.** ADR 0005 reserves stdout
+  for results, so `dn-tool` with no arguments returns `ErrNoCommand` (64) and
+  the banner is gone from stdout. The exemption that survives is the *explicit*
+  ask: `--help` and `--version` still write to stdout and exit 0, pinned by a
+  test so it reads as a decision rather than as leftover framework behavior.
+- **HTML escaping had to be turned off explicitly.** `encoding/json` escapes the
+  angle brackets and ampersand by default, so a hint naming a `dn-tool` command
+  placeholder rendered its brackets as `\uXXXX` escapes on a terminal. The
+  envelope is never embedded in HTML, so `Encoder.SetEscapeHTML(false)` costs
+  nothing and keeps hints readable.
+  `WriteResult` still escapes; aligning it belongs to the result-envelope work.
+- **The degrade path is one retry, not error handling.** An unmarshalable
+  `details` payload drops `details` and re-marshals; that second attempt cannot
+  fail, and the write itself is a sanctioned blank assignment — a failure to
+  report a failure has no channel left to report on, and must not displace the
+  error it describes.
+- **The `--assert-changed` no-op now renders on both streams.** Exit 1 is a
+  result class, so the result object still goes to stdout, and the boundary
+  additionally emits a `no_change` envelope (`ok: false`) on stderr because it
+  arrives as a non-nil error. That is deliberate — the code is exactly what a
+  polling consumer branches on — but it is the one case where stdout says `ok`
+  and stderr says otherwise, so the golden triples should pin it explicitly.
+
+## The stdout result envelope (dt-djf3, 2026-08-12)
+
+- **One envelope, not five.** All five commands emit the same `Result` payload,
+  so `ResultEnvelope{Head; Result}` replaced what would have been five identical
+  per-command types. Splitting waits for payloads that actually diverge; ADR
+  0005 asks for a shared *head*, not for per-command boilerplate.
+- **Embedded-struct inlining gives head-first order for free, and is pinned
+  anyway.** `encoding/json` inlines an embedded struct at its declaration
+  position, so `schema_version`/`ok` lead. That is a property of the encoder, not
+  of the contract, so `TestWriteResultKeyOrder` reads the ordered top-level keys
+  back through `json.Decoder` tokens (`Decode` into a `json.RawMessage` skips
+  each value, nested or not) rather than trusting it.
+- **Wrapping at the emit path is what makes the head unavoidable.**
+  `WriteResult` kept its `(w, Result)` signature and wraps internally, so every
+  existing call site gained the head with no edit and no call-site discipline to
+  forget. `internal/command`'s `withResult` was untouched.
+- **`Head` retired the error envelope's duplicate.** `errorEnvelope` embedded it
+  instead of redeclaring `schema_version`/`ok`, and both streams now marshal
+  through one `marshalLine` helper — which also closed dt-nljm's open seam where
+  stderr disabled HTML escaping and stdout did not. Two envelopes that must
+  agree on framing should not have two encoders.
+- **The rename was safe because the spelling was dn-tool's own.** `hostId`
+  appeared nowhere in the defined.net wire format (the `Host` object's field is
+  plain `id`) and contradicted `dnclient.yml`'s own `host_id`. Checking who owns
+  a field name before renaming it is the whole of the work; `internal/api`'s tags
+  are the API's contract and stay untouched.
+- **A type-level shape test does not prove the wiring.**
+  `internal/command/result_envelope_test.go` drives the real CLI and asserts the
+  bytes on stdout open with `{"schema_version":1,"ok":true,`, which is what a
+  consumer sees; the `output`-level tests alone would have passed even if
+  `withResult` had bypassed `WriteResult`.
+
+## The schema command (dt-3xxb, 2026-08-12)
+
+- **Project the running tree, not a restated surface.** `schemaEnvelope` reads
+  `cmd.Root()`, so a command's name, usage, argument synopsis, and flags appear
+  in the schema because they exist, not because someone remembered to list them.
+  That is what makes ADR 0005's "cannot drift" property structural rather than
+  test-enforced; the drift tests only guard the joins the tree cannot supply,
+  the exit-code registry and the error registry.
+- **The framework injects surface of its own.** urfave/cli adds a `help`
+  subcommand and a `--help` flag to every command at run time, so the
+  projection is not simply `root.Commands`. The `help` command is skipped: it
+  is scaffolding with no entry in `CommandExitCodes`, and including it would
+  make the registry-coverage drift test fail on something dn-tool never
+  declared. The flags are reported as-is, because `--help` and `--version` are
+  genuinely invocable.
+- **The error inventory's completeness is an import-graph property.**
+  `terr.New` registers at package init, so `terr.All()` returns only sentinels
+  from packages linked into the binary. `internal/command` transitively imports
+  every package that raises a failure, which is why the inventory is complete
+  there and why the drift test belongs in that package: the same test in
+  `internal/output` would pass vacuously against an empty registry.
+- **Null-coalescing lives on the envelope, and the alias sheds the method.**
+  `type alias SchemaEnvelope` inside `MarshalJSON` drops the method set, so
+  `json.Marshal(alias(e))` terminates instead of recursing, and the embedded
+  `Head` still marshals first. Both the envelope and `SchemaCommand` need it:
+  coalescing one level does nothing for a nested command's empty `flags`.
+- **The passthrough exception is a boolean, and it is always emitted.**
+  `RunPassesThroughDaemonExitStatus` reaches consumers as
+  `passes_through_child_exit_status` on every command, `false` included, so a
+  consumer reads the field without a presence check. `run`'s name became a
+  constant (`runCommandName`) because the tree and the projection have to agree
+  on it.
+
+## The golden-triple CLI harness (dt-cjgq, 2026-08-12)
+
+- **Normalization is the whole engineering problem.** The delegate contract is
+  trivial to drive; making its output byte-stable is not. dn-tool leaks five
+  classes of volatile value into stdout/stderr: temp paths (`t.TempDir()`),
+  `httptest` ports, the build-injected `version.Current()`, and the `run_id` and
+  `time` fields ADR 0004 stamps on every log record. The harness masks the
+  scenario-specific literals a fixture hands it (longest first, so a nested path
+  cannot defeat its parent) and pattern-masks the rest. `TestGolden_IsDeterministic`
+  runs every scenario twice and `TestGolden_NoVolatileValuesInGoldens` re-reads
+  the committed files, so a missed value fails on the first run rather than
+  flaking in someone else's.
+- **An unset `DN_HOSTNAME` is a volatile value.** `config.load` falls back to the
+  system hostname, which then appears in every golden that names the enrollment
+  (the orphan message, the create request). Pinning `DN_HOSTNAME` in the fixture
+  was cheaper than masking a value the harness would have to look up.
+- **A short `DN_API_TIMEOUT` buys the 69 scenario back in half a second.** A 5xx
+  is retried four times with a 1s minimum backoff, so the honest
+  API-unavailable scenario would sleep ~15s. With `DN_API_TIMEOUT=500ms` the
+  context deadline cuts the first backoff, the classification is identical
+  (`api_unavailable`, 69), and the message is stable — one attempt, always,
+  because the backoff exceeds the deadline.
+- **Three declared codes are unreachable in process, and saying so is part of
+  the contract.** 70 needs an error with no classification, which no CLI
+  invocation produces; 130/143 need a real signal. They are listed in
+  `exemptFromCoverage` with the test that does cover each, and
+  `TestGolden_ExemptionsAreDocumented` fails an entry that names no test file. A
+  silent exemption would make the coverage check read as "everything is
+  covered".
+- **The coverage check has to skip a filtered run.** `TestMain` asserts registry
+  coverage only when neither `-update` nor `-test.run` is in effect: running one
+  scenario is what a filter is for, and failing the package for it would train
+  everyone to ignore the check.
+- **`run`'s success golden is exit 0 and two empty streams.** It emits no result
+  envelope — its outcome is the daemon's termination — so the triple is thin but
+  real: the fixture's `dnclient` stand-in plays both `run` (creates the control
+  socket, blocks) and `enroll` (writes the local config the shutdown unenroll
+  reads the host id from), which exercises the whole
+  install → daemon → wait-ready → enroll → unenroll order in process.
+- **`package command_test` is the point.** The suite imports `internal/command`
+  and touches only `Run` and `Deps`, so it cannot reach into the urfave/cli
+  interior even accidentally — which is what makes it the safety net for a
+  framework replacement rather than another thing to rewrite during one.

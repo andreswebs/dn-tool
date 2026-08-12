@@ -15,7 +15,6 @@ import (
 	"time"
 
 	"github.com/andreswebs/dn-tool/internal/config"
-	"github.com/andreswebs/dn-tool/internal/output"
 	"github.com/hashicorp/go-retryablehttp"
 )
 
@@ -129,12 +128,36 @@ type Client struct {
 	httpClient *http.Client
 }
 
+// Option configures a Client at construction. Options exist rather than extra
+// parameters because a Client is built from cfg alone at every call site, while
+// one concern (where the transport's retry chatter goes) belongs to the caller.
+type Option func(*options)
+
+// options holds the resolved Option values. Its zero value is the default: no
+// logger, so the transport is silent.
+type options struct {
+	logger *slog.Logger
+}
+
+// WithLogger routes the transport's retry chatter through l. The orchestration
+// layer passes the invocation's logger (logctx.From(ctx)); a caller that passes
+// none, which is every test in this package, gets a silent transport rather than
+// a library writing to a stream it was never handed (ADR 0004).
+func WithLogger(l *slog.Logger) Option {
+	return func(o *options) { o.logger = l }
+}
+
 // New builds a Client from cfg: baseURL from cfg.APIURL, bearer auth from
 // cfg.APIKey. Its HTTP transport retries transient failures with bounded
 // exponential backoff (Requirement 9); the overall deadline is the context
-// passed per call (set from DN_API_TIMEOUT by the command layer).
-func New(cfg *config.Config) *Client {
-	rc := newRetryableClient(slog.Default(), defaultRetryMax, defaultRetryWaitMin, defaultRetryWaitMax)
+// passed per call (set from DN_API_TIMEOUT by the command layer). Retry
+// diagnostics are emitted only when WithLogger supplies a logger.
+func New(cfg *config.Config, opts ...Option) *Client {
+	var resolved options
+	for _, opt := range opts {
+		opt(&resolved)
+	}
+	rc := newRetryableClient(resolved.logger, defaultRetryMax, defaultRetryWaitMin, defaultRetryWaitMax)
 	return &Client{
 		baseURL:    cfg.APIURL,
 		apiKey:     cfg.APIKey,
@@ -178,7 +201,7 @@ func (c *Client) execute(ctx context.Context, method, path string, body any) ([]
 	if err != nil {
 		// A transport failure means the management API was unreachable (DNS,
 		// connection, or a retry-exhausted timeout): EX_UNAVAILABLE (ADR 0001).
-		return nil, output.Classify(fmt.Errorf("%s %s: %w", method, path, err), output.CodeUnavailable)
+		return nil, ErrAPIUnavailable.Wrap(fmt.Errorf("%s %s: %w", method, path, err))
 	}
 	defer func() { _ = resp.Body.Close() }()
 
@@ -192,20 +215,20 @@ func (c *Client) execute(ctx context.Context, method, path string, body any) ([]
 				apiErr.Errors = envelope.Errors
 			}
 		}
-		// A 5xx is the API failing on its side (EX_UNAVAILABLE); a 4xx rejected
-		// our request payload or arguments (EX_DATAERR). The typed *APIError stays
-		// in the chain so callers (enroll's duplicate-name recovery) still branch
-		// on its static code/path via errors.As.
-		code := output.CodeData
+		// A 5xx is the API failing on its side (ErrAPIUnavailable); a 4xx rejected
+		// our request payload or arguments (ErrAPIRejected). The typed *APIError
+		// stays in the chain so callers (enroll's duplicate-name recovery) still
+		// branch on its static code/path via errors.As.
+		class := ErrAPIRejected
 		if apiErr.StatusCode >= 500 {
-			code = output.CodeUnavailable
+			class = ErrAPIUnavailable
 		}
-		return nil, output.Classify(fmt.Errorf("%s %s: %w", method, path, apiErr), code)
+		return nil, class.Wrap(fmt.Errorf("%s %s: %w", method, path, apiErr))
 	}
 
 	rawBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("%s %s: reading response body: %w", method, path, err)
+		return nil, ErrAPIMalformedResponse.Wrap(fmt.Errorf("%s %s: reading response body: %w", method, path, err))
 	}
 	return rawBody, nil
 }
@@ -226,10 +249,10 @@ func (c *Client) do(ctx context.Context, method, path string, body, out any) err
 		Data json.RawMessage `json:"data"`
 	}
 	if err := json.Unmarshal(rawBody, &envelope); err != nil {
-		return fmt.Errorf("decoding response envelope: %w", err)
+		return ErrAPIMalformedResponse.Wrap(fmt.Errorf("decoding response envelope: %w", err))
 	}
 	if err := json.Unmarshal(envelope.Data, out); err != nil {
-		return fmt.Errorf("decoding response data: %w", err)
+		return ErrAPIMalformedResponse.Wrap(fmt.Errorf("decoding response data: %w", err))
 	}
 	return nil
 }

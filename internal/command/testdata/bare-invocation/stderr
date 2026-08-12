@@ -1,0 +1,1 @@
+{"schema_version":1,"ok":false,"error":{"code":"no_command","message":"no command given","hint":"run `dn-tool --help` for the list of commands"}}

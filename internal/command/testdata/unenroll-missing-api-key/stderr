@@ -1,0 +1,1 @@
+{"schema_version":1,"ok":false,"error":{"code":"missing_api_key","message":"DN_API_KEY is required to unenroll","hint":"set DN_API_KEY to a management API key with host-delete scope"}}

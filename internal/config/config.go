@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/andreswebs/dn-tool/internal/output"
+	"github.com/andreswebs/dn-tool/internal/logctx"
 )
 
 // Config holds every DN_* setting. Field defaults follow design §2.3.
@@ -32,7 +32,7 @@ type Config struct {
 	ClientConfigDir string        // DN_CLIENT_CONFIG_DIR, default "/var/lib/defined" (dnclient config root; <network>/dnclient.yml lives here)
 	ClientSocket    string        // DN_CLIENT_SOCKET, default "/var/run/defined/dnclient.<network>.sock" (dnclient control socket; run polls it before enroll)
 	ClientVersion   string        // DN_CLIENT_VERSION, default "latest"
-	LogLevel        string        // DN_LOG_LEVEL, default "info"
+	LogLevel        string        // DN_LOG_LEVEL, default "warn" (the logger's env fallback; the --log-level flag wins)
 
 	// Module-only knobs: loaded for completeness but inert in the binary; the
 	// NixOS module's stop wiring consumes them (design §2.7).
@@ -53,11 +53,14 @@ func (c *Config) Timeout(fallback time.Duration) time.Duration {
 
 // Load reads every DN_* variable from getenv and applies the §2.3 defaults.
 // getenv is injected so tests need not touch the real environment. A malformed
-// or out-of-range DN_* value is a configuration error (EX_CONFIG, ADR 0001),
-// classified at this package boundary so the command layer need not re-map it.
+// or out-of-range DN_* value is ErrConfig (EX_CONFIG, ADR 0001), coded at this
+// package boundary so the command layer need not re-map it.
 func Load(getenv func(string) string) (*Config, error) {
 	cfg, err := load(getenv, os.Hostname)
-	return cfg, output.Classify(err, output.CodeConfig)
+	if err != nil {
+		return nil, ErrConfig.Wrap(err)
+	}
+	return cfg, nil
 }
 
 // load is the testable core: hostname is injected so the system-hostname
@@ -73,7 +76,7 @@ func load(getenv func(string) string, hostname func() (string, error)) (*Config,
 		ClientBinDir:    orDefault(getenv("DN_CLIENT_BIN_DIR"), "/var/lib/defined/bin"),
 		ClientConfigDir: orDefault(getenv("DN_CLIENT_CONFIG_DIR"), "/var/lib/defined"),
 		ClientVersion:   orDefault(getenv("DN_CLIENT_VERSION"), "latest"),
-		LogLevel:        orDefault(getenv("DN_LOG_LEVEL"), "info"),
+		LogLevel:        orDefault(getenv("DN_LOG_LEVEL"), logctx.DefaultLevel),
 	}
 	cfg.ClientSocket = orDefault(getenv("DN_CLIENT_SOCKET"), defaultClientSocket(cfg.NetworkName))
 

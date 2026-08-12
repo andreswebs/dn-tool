@@ -1,0 +1,1 @@
+{"schema_version":1,"ok":false,"error":{"code":"usage_error","message":"invalid command line: flag provided but not defined: -nonexistent","hint":"check the invocation against `dn-tool <command> --help`"}}

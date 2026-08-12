@@ -1,0 +1,1 @@
+{"schema_version":1,"ok":false,"error":{"code":"dnclient_failed","message":"dnclient invocation failed: dnclient enroll: exit status 3","hint":"check that dnclient is installed and executable (run `dn-tool install`), then inspect the dnclient output on stderr","details":{"exit_status":3}}}

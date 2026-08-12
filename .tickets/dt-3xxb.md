@@ -1,6 +1,6 @@
 ---
 id: dt-3xxb
-status: open
+status: closed
 deps: [dt-2efx, dt-djf3, dt-w86c]
 links: []
 created: 2026-08-12T13:21:42Z
@@ -156,3 +156,27 @@ and dt-w86c (the command tree lives in the delegate). Blocks dt-cjgq, dt-o9hi.
 ## Do not commit
 
 Leave git commits and branching to the repo owner.
+
+## Notes
+
+**2026-08-12T15:37:04Z**
+
+Implemented the schema command (ADR 0005) as a projection of live declarations.
+
+Code:
+- internal/output/schema.go (new): SchemaEnvelope / SchemaCommand / SchemaFlag / SchemaError, both container types with a null-coalescing MarshalJSON (type-alias trick, so the embedded Head still marshals first); AllExitCodes() (sorted, de-duplicated union of CommandExitCodes) and ErrorInventory() (terr.All() projection, registration order).
+- internal/command/schema.go (new): the action. Reads cmd.Root() and projects name/usage/ArgsUsage/flags per command, so nothing about the surface is restated. Skips urfave's injected 'help' subcommand (framework scaffolding, no exit-code declaration); keeps --help/--version as flags since they are genuinely invocable. Emits via output.EmitJSON to root.Writer; a write failure maps to config.ErrFileIO (74).
+- internal/output/exitcodes.go: added "schema": {0, 64, 70, 74}.
+- internal/command/commands.go: registered the command; extracted runCommandName so the tree and the passthrough marker cannot disagree.
+
+Contract: {schema_version, ok, tool, version, commands[], global_flags[], exit_codes[], errors[]}. Each command carries its own exit_codes plus passes_through_child_exit_status (always emitted, true only for run, fed from RunPassesThroughDaemonExitStatus). exit_codes at tool level is the union [0,1,64,65,69,70,74,78,130,143]. All 25 registered sentinels appear with code/exit_code/hint.
+
+schema --command CMD stayed out of scope per the ticket: all commands share one ResultEnvelope.
+
+Tests (TDD, red first): internal/output/schema_test.go covers nil-collection coalescing at both levels, head-first order, args omission, the union's sortedness/completeness, and the inventory projection. internal/command/schema_test.go drives the real CLI and holds the drift tests: tree-vs-projection both ways, per-command registry match, union match, passthrough only on run, every terr.All() sentinel present (with a cross-package spot check), global and command-scoped flags, and the unwritable-stdout -> 74 path.
+
+Two existing tests moved with the new command: output/exitcodes_test.go's covered-commands list gained "schema", and command/root_test.go's TestNewRoot_HasFiveSubcommands became HasSixSubcommands.
+
+Docs: design §2.2 table, design Req 8 (schema is the registry's runtime projection), README command table, CHANGELOG Unreleased/Added, docs/specs/learnings.md. Note markdownlint-cli2 could not use ~/.markdownlint.yaml (absent in this environment); the new prose wraps at 80 and reports no MD013 errors, while the pre-existing 48 in learnings.md were left untouched.
+
+make build green. Not committed, per repo policy. Next in the epic: dt-cjgq (the golden-triple harness should pin a schema triple), then dt-o9hi.

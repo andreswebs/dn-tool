@@ -4,6 +4,8 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+
+	"github.com/andreswebs/dn-tool/internal/terr"
 )
 
 // knownCodes is every exit code the taxonomy defines (ADR 0001). The registry
@@ -43,7 +45,7 @@ func TestRegistry_DeclaresOnlyKnownCodes(t *testing.T) {
 // TestRegistry_CommandsCovered pins the set of commands with a declared exit-code
 // contract, so a new command cannot be added without also declaring its codes.
 func TestRegistry_CommandsCovered(t *testing.T) {
-	want := []string{"install", "enroll", "unenroll", "write-config", "run", "dn-tool"}
+	want := []string{"install", "enroll", "unenroll", "write-config", "run", "schema", "dn-tool"}
 	for _, cmd := range want {
 		if _, ok := CommandExitCodes[cmd]; !ok {
 			t.Errorf("command %q missing from the exit-code registry", cmd)
@@ -70,35 +72,34 @@ func TestRegistry_RunAddsSignalCodes(t *testing.T) {
 }
 
 // TestConformance_EachClassResolves is the ADR conformance test: for every
-// failure/result class, a constructed error resolves through ResolveExitCode to
-// the expected code. The cheap surfaces (usage, config, result) and the
-// API/network classes are all exercised as constructed errors here; the cmd and
-// package suites drive the same classes through real code paths (assert no-op,
-// unknown command, config parse failure, API status errors).
+// failure/result class, a coded error resolves through ExitCodeFor to the
+// expected code. The cheap surfaces (usage, config, result) and the API/network
+// classes are all exercised as constructed errors here; the command and package
+// suites drive the same classes through real code paths (assert no-op, unknown
+// command, config parse failure, API status errors).
 func TestConformance_EachClassResolves(t *testing.T) {
-	base := errors.New("boom")
+	coded := func(code string, exit int) error { return terr.Newf(code, exit, "", "boom") }
 	cases := []struct {
 		name string
 		err  error
 		want int
 	}{
-		{"success", nil, CodeOK},
-		{"result", ExitError(errors.New("no change made"), CodeResult), CodeResult},
-		{"usage", Classify(base, CodeUsage), CodeUsage},
-		{"data", Classify(base, CodeData), CodeData},
-		{"unavailable", Classify(base, CodeUnavailable), CodeUnavailable},
-		{"internal", base, CodeInternal},
-		{"io", Classify(base, CodeIO), CodeIO},
-		{"config", Classify(base, CodeConfig), CodeConfig},
-		{"sigint", ExitError(errors.New("terminated"), CodeSIGINT), CodeSIGINT},
-		{"sigterm", ExitError(errors.New("terminated"), CodeSIGTERM), CodeSIGTERM},
+		{"result", coded("no_change", CodeResult), CodeResult},
+		{"usage", coded("usage_error", CodeUsage), CodeUsage},
+		{"data", coded("data_error", CodeData), CodeData},
+		{"unavailable", coded("unavailable", CodeUnavailable), CodeUnavailable},
+		{"internal", errors.New("boom"), CodeInternal},
+		{"io", coded("io_error", CodeIO), CodeIO},
+		{"config", coded("config_error", CodeConfig), CodeConfig},
+		{"sigint", coded("signal_shutdown", CodeSIGINT), CodeSIGINT},
+		{"sigterm", coded("signal_shutdown", CodeSIGTERM), CodeSIGTERM},
 		// A class assigned at a leaf survives fmt.Errorf %w wrapping up the stack.
-		{"wrapped io survives", fmt.Errorf("outer: %w", Classify(base, CodeIO)), CodeIO},
+		{"wrapped io survives", fmt.Errorf("outer: %w", coded("io_error", CodeIO)), CodeIO},
 	}
 	for _, tt := range cases {
 		t.Run(tt.name, func(t *testing.T) {
-			if got := ResolveExitCode(tt.err); got != tt.want {
-				t.Errorf("ResolveExitCode() = %d, want %d", got, tt.want)
+			if got := ExitCodeFor(tt.err); got != tt.want {
+				t.Errorf("ExitCodeFor() = %d, want %d", got, tt.want)
 			}
 		})
 	}

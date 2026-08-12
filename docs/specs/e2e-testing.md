@@ -1,15 +1,15 @@
 # End-to-end testing plan
 
 How to verify that `dn-tool` actually works, beyond the unit suite. `dn-tool` is
-a control plane: it wraps the [defined.net REST API](./research/defined-net-api-reference.md)
+a control plane: it wraps the [defined.net REST API](../research/defined-net-api-reference.md)
 and orchestrates the proprietary `dnclient` daemon. "Does it work" therefore
 spans four layers, from a fast offline CLI contract check to a full NixOS VM
 integration test. This document specifies each layer: its goal, prerequisites,
 what it covers, concrete cases, and a harness sketch.
 
-See also the authoritative [design](./dn-tool-design.md) (§2.8 output contract,
+See also the authoritative [design](../dn-tool-design.md) (§2.8 output contract,
 §2.11 testing, §2.7 module shape) and the
-[API reference](./research/defined-net-api-reference.md) for the exact endpoint
+[API reference](../research/defined-net-api-reference.md) for the exact endpoint
 and download shapes the fakes must mimic.
 
 ## What makes this non-trivial (read first)
@@ -40,19 +40,19 @@ Two configurability facts that the harnesses exploit or work around:
 
 ### Reference: the contracts the fakes must honor
 
-| Concern             | Contract (from code)                                                                                                                                                                                                                                                                                                                                    |
-| ------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Management API auth | `Authorization: Bearer $DN_API_KEY` against `DN_API_URL`                                                                                                                                                                                                                                                                                                |
-| Create host + code  | `POST /v2/host-and-enrollment-code` → `{data:{host, enrollmentCode}}`                                                                                                                                                                                                                                                                                   |
-| List hosts          | `GET /v2/hosts?filter.networkID=…` (cursor-paginated)                                                                                                                                                                                                                                                                                                   |
-| Delete host         | `DELETE /v1/hosts/{hostID}` (v1 only; 404 == idempotent success)                                                                                                                                                                                                                                                                                        |
-| Downloads           | `GET /v1/downloads` → table; binary at `<url>`, checksum at sibling `<url>.sha256`                                                                                                                                                                                                                                                                      |
-| dnclient enroll     | execs `<DN_CLIENT_BIN_DIR>/dnclient enroll -name <network> -code <code>`                                                                                                                                                                                                                                                                                |
-| dnclient run        | execs `<DN_CLIENT_BIN_DIR>/dnclient run -server <DN_API_URL> -name <network>`                                                                                                                                                                                                                                                                           |
-| Local config        | `<root>/<network>/dnclient.yml` with a `host_id:` field                                                                                                                                                                                                                                                                                                 |
-| stdout              | exactly one JSON `Result` per command (`install`/`enroll`/`unenroll`/`write-config`); `run` emits none                                                                                                                                                                                                                                                  |
-| stderr              | structured slog (JSON, or text with `--log-text`); secrets redacted to `REDACTED`                                                                                                                                                                                                                                                                       |
-| Exit codes          | Per [ADR 0001](adr/0001-exit-code-taxonomy.md): `0` success · `1` `--assert-changed` no-op (a result) · `64` usage/unknown command · `65` data (API 4xx, checksum) · `69` API unreachable (transport/5xx) · `70` unclassified · `74` local I/O · `78` config · `run` also exits `130`/`143` on SIGINT/SIGTERM and passes through the daemon's exit code |
+| Concern             | Contract (from code)                                                                                                                                                                                                                                                                                                                                       |
+| ------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Management API auth | `Authorization: Bearer $DN_API_KEY` against `DN_API_URL`                                                                                                                                                                                                                                                                                                   |
+| Create host + code  | `POST /v2/host-and-enrollment-code` → `{data:{host, enrollmentCode}}`                                                                                                                                                                                                                                                                                      |
+| List hosts          | `GET /v2/hosts?filter.networkID=…` (cursor-paginated)                                                                                                                                                                                                                                                                                                      |
+| Delete host         | `DELETE /v1/hosts/{hostID}` (v1 only; 404 == idempotent success)                                                                                                                                                                                                                                                                                           |
+| Downloads           | `GET /v1/downloads` → table; binary at `<url>`, checksum at sibling `<url>.sha256`                                                                                                                                                                                                                                                                         |
+| dnclient enroll     | execs `<DN_CLIENT_BIN_DIR>/dnclient enroll -name <network> -code <code>`                                                                                                                                                                                                                                                                                   |
+| dnclient run        | execs `<DN_CLIENT_BIN_DIR>/dnclient run -server <DN_API_URL> -name <network>`                                                                                                                                                                                                                                                                              |
+| Local config        | `<root>/<network>/dnclient.yml` with a `host_id:` field                                                                                                                                                                                                                                                                                                    |
+| stdout              | exactly one JSON result envelope per command (`install`/`enroll`/`unenroll`/`write-config`), opening with the `schema_version`/`ok` head; `run` emits none                                                                                                                                                                                                 |
+| stderr              | slog diagnostics at or above `--log-level` (default `warn`): JSON when stderr is not a terminal, text when it is; secrets redacted to `REDACTED`. One JSON error envelope per **failure**, written last — a non-failure status writes none, so exit `1` (`--assert-changed` no-op) and exits `130`/`143` (graceful shutdown) carry log records only        |
+| Exit codes          | Per [ADR 0001](../adr/0001-exit-code-taxonomy.md): `0` success · `1` `--assert-changed` no-op (a result) · `64` usage/unknown command · `65` data (API 4xx, checksum) · `69` API unreachable (transport/5xx) · `70` unclassified · `74` local I/O · `78` config · `run` also exits `130`/`143` on SIGINT/SIGTERM and passes through the daemon's exit code |
 
 ---
 
@@ -75,6 +75,67 @@ documented API/dnclient contracts match reality. Layers 1–4 close those.
 
 ---
 
+## Layer 0b — In-process golden triple (exists; the contract snapshot)
+
+**Goal.** Freeze the CLI's exact stdout, stderr and exit code per scenario, so
+any change to the output or exit contract shows up as a reviewable diff.
+
+**Status.** Done, per [ADR 0006](../adr/0006-cli-testing.md). The suite lives in
+`internal/command/golden_test.go` (harness) and
+`internal/command/golden_scenarios_test.go` (cases), with goldens under
+`internal/command/testdata/<scenario>/{stdout,stderr,exit}`. Scenarios drive the
+framework-free delegate — `command.Run(args, deps)` — with buffer streams and a
+fake environment, so the suite survives a CLI-framework replacement and is the
+safety net for one.
+
+**Run.** `go test ./internal/command`. Regenerate the goldens with
+`go test ./internal/command -update`, then review the diff.
+
+**How it differs from the exec-based layers.** It is in process: no built binary,
+no subprocess, no container, and no process-level behavior. It reaches the
+management API through `httptest` and `dnclient` through a shell stand-in placed
+in a temp `DN_CLIENT_BIN_DIR`, and it normalizes every volatile value (temp
+paths, ephemeral ports, the build version, the log `run_id` and record
+timestamps) to a stable token before comparing.
+
+**Which layer owns which exit code.**
+
+| Exit code                              | Owner                                                                                                      |
+| -------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `0`, `1`, `64`, `65`, `69`, `74`, `78` | Layer 0b, through the CLI, one scenario each at minimum (Layers 1–3 re-verify them on the real binary)     |
+| `70` (unclassified)                    | Layer 0 — no CLI invocation can provoke an unclassified error; asserted on a constructed one               |
+| `130` / `143` (signal)                 | Layer 0 (`internal/run/signal_test.go`) plus Layer 1b (`e2e/signal_test.go`), which delivers a real signal |
+| daemon exit-status passthrough         | Layer 0 (`internal/run/run_test.go`) plus the exec-based container suite (Layer 2)                         |
+
+The three rows Layer 0b cannot reach are exempted **explicitly** in
+`exemptFromCoverage` (`internal/command/golden_test.go`), each naming the test
+that does cover it; the harness fails if any other declared code goes
+unexercised.
+
+---
+
+## Layer 1b — Exec-level signal suite (exists; the process-behavior net)
+
+**Goal.** Cover what an in-process harness structurally cannot: behavior that
+needs a real process receiving a real signal.
+
+**Status.** Done, in `e2e/` (`go test ./e2e`, part of `make build`). It builds
+the binary, serves a fake management API on loopback, serves a shell stand-in
+for `dnclient` as the download `install` verifies and places, drives the full
+`install → enroll → daemon` chain, then signals the process.
+
+**What it covers.** On SIGTERM and on SIGINT: the shutdown unenroll runs (the
+fake API sees the `DELETE`), the process exits `143` / `130`, stdout stays
+empty, and **stderr carries no error envelope and no `ok:false`** — a graceful
+stop is not a failure (design Requirement 5, ADR 0005). This is the assertion
+whose absence let the graceful-stop error envelope reach real output (dt-nrq1).
+
+**Prerequisites.** Linux on amd64 or arm64 (the `install` platform gate); the
+test skips elsewhere, since on another host it would pin the platform rejection
+instead.
+
+---
+
 ## Layer 1 — CLI contract (offline, runs on any OS incl. this macOS)
 
 **Goal.** Exercise the _real_ binary's command surface, flag parsing, config
@@ -90,9 +151,11 @@ of bug that left `run` as `notImplemented`). It is fast and hermetic.
 **What it covers / concrete cases.**
 
 - **Discovery:** `--version` prints the stamped version; `--help` lists exactly
-  the five commands; each `<cmd> --help` works; `--force` appears only on
+  the six commands; each `<cmd> --help` works; `--force` appears only on
   `enroll`.
-- **Unknown command** → exit `64`, usage on stderr.
+- **Unknown command** → exit `64`, an error envelope with
+  `"code":"unknown_command"` on stderr and nothing on stdout. A bare `dn-tool`
+  behaves the same with `"code":"no_command"`.
 - **Missing required config:** `unenroll` with no `DN_API_KEY` → clear
   `DN_API_KEY is required` error, exit `78` (config class), nothing written to
   `/etc/defined`. `enroll` with no `DN_API_KEY`/`DN_NETWORK_ID`/`DN_ROLE_ID` →
@@ -104,13 +167,19 @@ of bug that left `run` as `notImplemented`). It is fast and hermetic.
   live env resolves to the live env value; a value like
   `DN_TAGS='$(touch /tmp/pwned)'` is treated as literal data (no file created,
   no shell execution).
-- **Output streams:** a command's JSON `Result` goes to **stdout** and is
-  parseable by `jq`; logs go to **stderr**; `--log-text` switches stderr to
-  plain text while stdout stays JSON.
+- **Output streams:** a command's JSON result envelope goes to **stdout** and is
+  parseable by `jq` (assert `.schema_version == 1` and `.ok == true` alongside the
+  payload); logs go to **stderr**, as JSON when stderr is redirected and as text
+  at a terminal, while stdout stays JSON either way.
 - **`--assert-changed`:** a no-op command (e.g. `write-config` is always a
-  change; use `install` idempotent skip on Linux, or an `enroll` already-enrolled
-  no-op on Linux) exits `1` (a result); a real change exits `0`; a failure exits
-  in the sysexits range (`64`-`78`), never `1`.
+  change; use `install` idempotent skip on Linux, or an `enroll`
+  already-enrolled no-op on Linux) exits `1` (a result) with its `ok:true`
+  result envelope on stdout and **no error envelope on stderr**; a real change
+  exits `0`; a failure exits in the sysexits range (`64`-`78`), never `1`.
+- **Verbosity:** the default level is `warn`, so a successful command writes
+  nothing to stderr; `--log-level debug` opens it up, `--quiet` closes it to
+  errors only, and a bad `--log-level` exits `64` while a bad `DN_LOG_LEVEL`
+  exits `78`.
 - **Secret redaction:** with `DN_LOG_LEVEL=debug`, no stderr line contains the
   `DN_API_KEY` value; it appears only as `REDACTED`.
 
@@ -130,6 +199,11 @@ env -i DN_API_KEY=secret DN_NETWORK_ID=net DN_ROLE_ID=role \
   "$BIN" write-config "${tmp}/dn.env"
 test "$(stat -f '%Lp' "${tmp}/dn.env" 2>/dev/null || stat -c '%a' "${tmp}/dn.env")" = "600"
 env -i "$BIN" --env-file "${tmp}/dn.env" write-config "${tmp}/dn2.env"  # parses, no exec
+
+# stdout is one result envelope opening with the schema_version/ok head
+env -i DN_API_KEY=secret DN_NETWORK_ID=net DN_ROLE_ID=role \
+  "$BIN" write-config "${tmp}/dn3.env" \
+  | jq -e '.schema_version == 1 and .ok == true and .action == "write-config"'
 
 # secret never logged
 env -i DN_API_KEY=supersecret DN_LOG_LEVEL=debug "$BIN" unenroll 2>&1 \
@@ -218,9 +292,11 @@ including the real download→checksum→atomic-place, the real exec, and the re
   already-absent `404` → treated as success.
 - **run (lifecycle):** `install → enroll → fake daemon foreground`; send
   `SIGTERM` → fake daemon exits 0, then `unenroll` runs (real DELETE), process
-  exits `143` (`128 + SIGTERM`, the graceful-shutdown signal code); make the fake
-  daemon `exit 7` with no signal → `dn-tool` exits `7` (daemon exit-code
-  propagation, the registry exception).
+  exits `143` (`128 + SIGTERM`, the graceful-shutdown signal code) with no error
+  envelope on stderr (covered by Layer 1b already); make the fake daemon `exit 7`
+  with no signal → `dn-tool` exits `7` (daemon exit-code propagation, the
+  registry exception) **with** an error envelope, since a daemon that died on
+  its own is a real failure.
 
 **Harness options.**
 
@@ -283,7 +359,7 @@ arg contract and exit behavior.
 
 **Cautions.** Mutates live records — always unenroll/clean up; prefer a
 throwaway network. Treat any mismatch with
-[the API reference](./research/defined-net-api-reference.md) as a doc-vs-reality
+[the API reference](../research/defined-net-api-reference.md) as a doc-vs-reality
 bug to reconcile (the reference drove the fakes, so a mismatch invalidates Layer
 2 assumptions too).
 

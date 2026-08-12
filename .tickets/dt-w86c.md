@@ -1,6 +1,6 @@
 ---
 id: dt-w86c
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-08-12T13:21:42Z
@@ -181,3 +181,20 @@ None. Blocks dt-uq9d, dt-3xxb, dt-cr62, dt-cjgq, dt-o9hi.
 
 Leave git commits and branching to the repo owner. Staging is permitted only
 where a workflow explicitly requires it.
+
+## Notes
+
+**2026-08-12T13:57:25Z**
+
+Moved the whole CLI surface from package main into internal/command behind Run(args []string, deps Deps) int (ADR 0003). cmd/dn-tool/main.go is now just os.Exit(command.Run(os.Args[1:], Deps{In,Out,Err,Getenv})) and is the only place os.Std*/os.Args/os.Getenv appear (internal/dnclient/client.go:71-72 excepted, per the ticket).
+
+Layout: internal/command/run.go = the framework-free contract (Deps, Deps.withDefaults, Run, exitCode); root.go = the interior (rootName, runRoot, newRoot, neutralize, logOptions, onUsageError, rootAction); commands.go = the tree + the actions struct that carries Deps + withResult/resultAction/errNoChange/loadConfig. The five action files moved verbatim except that each wired action became a method on actions (a.install/a.enroll/a.unenroll/a.run/a.writeConfig) so loadConfig resolves from deps.Getenv instead of os.Getenv. cmd/dn-tool/run.go became internal/command/run_command.go (run.go was taken by the contract); main_test.go became root_test.go (TestNewApp_* -> TestNewRoot_*).
+
+Decisions worth knowing:
+- neutralize() sets ExitErrHandler on the ROOT only, and touches nothing else. Command.handleExitCoder recurses to the parent before consulting the field, so the root's handler covers the whole tree; this is the opposite of OnUsageError, which is looked up on the command being parsed with no parent walk and is therefore still set on the root AND every subcommand. Per the ticket's preference, dn-tool keeps its structural OnUsageError mapping and adds no classifyUsage string matching.
+- exitCode(err, w) in run.go replaces exitWithError. It reproduces cli.HandleExitCoder's selection deliberately: the innermost error carrying a code supplies both the printed message and the code (via output.ResolveExitCode), unclassified -> CodeInternal. It stays framework-free by declaring a local structural interface { error; ExitCode() int } rather than importing cli.ExitCoder. dt-uq9d replaces this body with output.ExitCodeFor + EmitError, and will also fix the discarded-wrapper-context defect this faithfully preserves.
+- Deps.withDefaults() maps unset fields to io.Discard / empty reader / empty env. Needed: a nil Writer makes urfave fall back to the real os.Stdout, which would silently reintroduce process coupling.
+
+Tests: all nine files carried over, none deleted. captureExit and the two TestExitWithError_* tests are gone, replaced by direct TestExitCode_* tests on the new boundary (nil/plain/coded/wrapped-coded). runApp() now calls Run(args, deps) and reads the returned int; assert_changed_test drives its stub tree through neutralize()+exitCode. The end-to-end unenroll and write-config tests dropped t.Setenv in favour of the injected Getenv, so the CLI suite no longer mutates the real process environment. New: TestRun_* contract tests (usage code, success + JSON on deps.Out, config from deps.Getenv, zero-Deps safety), TestLogOptions_LevelComesFromDepsGetenv, and conformance_test.go's TestPackageNeverTouchesTheProcessEnvironment, a source-level guard that fails if os.Getenv/os.Args/os.Std* reappears in the package's non-test files (verified it fails on a planted violation).
+
+Behavior unchanged, verified on the built binary: bare=0, unknown command=64, bad global flag=64, bad subcommand flag=64, malformed DN_LISTEN_PORT=78, write-config emits one JSON object and exits 0, --version prints. go doc ./internal/command shows no urfave type in any exported identifier. make build green. Left for other tickets: bare invocation -> 64 (dt-nljm), the two slog.SetDefault calls (dt-cr62), design doc section 2.9's stale structure tree (dt-o9hi).

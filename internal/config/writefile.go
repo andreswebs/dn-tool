@@ -3,8 +3,6 @@ package config
 import (
 	"fmt"
 	"os"
-
-	"github.com/andreswebs/dn-tool/internal/output"
 )
 
 // WriteConfigFile serializes cfg to the env-file KEY=VALUE format (Marshal) and
@@ -26,18 +24,18 @@ func WriteConfigFile(path string, cfg *Config) error {
 		return err
 	}
 
-	// File-creation and write faults are local I/O errors (EX_IOERR, ADR 0001).
+	// File-creation and write faults are ErrFileIO (EX_IOERR, ADR 0001).
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o600)
 	if err != nil {
-		return output.Classify(fmt.Errorf("creating config file %s: %w", path, err), output.CodeIO)
+		return ErrFileIO.Wrap(fmt.Errorf("creating config file %s: %w", path, err))
 	}
 
 	if _, err := f.Write(data); err != nil {
 		_ = f.Close()
-		return output.Classify(fmt.Errorf("writing config file %s: %w", path, err), output.CodeIO)
+		return ErrFileIO.Wrap(fmt.Errorf("writing config file %s: %w", path, err))
 	}
 	if err := f.Close(); err != nil {
-		return output.Classify(fmt.Errorf("closing config file %s: %w", path, err), output.CodeIO)
+		return ErrFileIO.Wrap(fmt.Errorf("closing config file %s: %w", path, err))
 	}
 	return nil
 }

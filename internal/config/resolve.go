@@ -3,8 +3,6 @@ package config
 import (
 	"fmt"
 	"os"
-
-	"github.com/andreswebs/dn-tool/internal/output"
 )
 
 // LoadWithEnvFile builds the Config from the live environment, optionally
@@ -22,14 +20,14 @@ func LoadWithEnvFile(envFilePath string, getenv func(string) string) (*Config, e
 	if envFilePath != "" {
 		f, err := os.Open(envFilePath)
 		if err != nil {
-			// A configured env-file that cannot be read is a configuration error
-			// (EX_CONFIG, ADR 0001), not a generic I/O fault: the operator named a
-			// file that dn-tool cannot use as its config source.
-			return nil, output.Classify(fmt.Errorf("opening env-file %q: %w", envFilePath, err), output.CodeConfig)
+			// A configured env-file that cannot be read is ErrEnvFile (EX_CONFIG,
+			// ADR 0001), not a generic I/O fault: the operator named a file that
+			// dn-tool cannot use as its config source.
+			return nil, ErrEnvFile.Wrap(fmt.Errorf("opening env-file %q: %w", envFilePath, err))
 		}
 		defer func() { _ = f.Close() }()
 		if fileVars, err = ParseEnvFile(f); err != nil {
-			return nil, output.Classify(fmt.Errorf("parsing env-file %q: %w", envFilePath, err), output.CodeConfig)
+			return nil, ErrEnvFile.Wrap(fmt.Errorf("parsing env-file %q: %w", envFilePath, err))
 		}
 	}
 	return Resolve(fileVars, getenv)
@@ -51,7 +49,10 @@ func LoadWithEnvFile(envFilePath string, getenv func(string) string) (*Config, e
 // is non-empty.
 func Resolve(fileVars map[string]string, getenv func(string) string) (*Config, error) {
 	cfg, err := resolve(fileVars, getenv, os.Hostname)
-	return cfg, output.Classify(err, output.CodeConfig)
+	if err != nil {
+		return nil, ErrConfig.Wrap(err)
+	}
+	return cfg, nil
 }
 
 // resolve is the testable core: the system-hostname source is injected so the

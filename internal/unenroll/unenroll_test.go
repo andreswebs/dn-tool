@@ -148,12 +148,12 @@ func TestUnenrollDeleteFailureExitsNonZero(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected error, got nil")
 	}
-	code := output.ResolveExitCode(err)
+	code := output.ExitCodeFor(err)
 	if code < 64 {
-		t.Errorf("ResolveExitCode = %d, want a failure code (>= 64)", code)
+		t.Errorf("ExitCodeFor = %d, want a failure code (>= 64)", code)
 	}
 	if code == output.CodeResult {
-		t.Errorf("ResolveExitCode = %d (result), want a failure code", code)
+		t.Errorf("ExitCodeFor = %d (result), want a failure code", code)
 	}
 }
 

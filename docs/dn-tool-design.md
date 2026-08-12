@@ -216,9 +216,9 @@ pipelines can consume results and logs without scraping prose.
 - WHEN a command produces a result, the system shall write that result as a
   structured JSON object to standard output.
 - The system shall write diagnostic and progress logs to standard error.
-- The system shall emit logs as structured JSON by default.
-- WHERE human-readable logging is requested, the system shall emit logs as plain
-  text to standard error.
+- WHERE standard error is not a terminal, the system shall emit logs as
+  structured JSON.
+- WHERE standard error is a terminal, the system shall emit logs as plain text.
 - The system shall not write secret values, including the API key, to its logs.
 - WHERE a log level is configured, the system shall emit only logs at or above
   that level.
@@ -228,9 +228,11 @@ pipelines can consume results and logs without scraping prose.
 **User Story**: As an automation author, I want meaningful exit codes, so that
 scripts can branch on success, failure, and no-op without parsing output.
 
-**Acceptance Criteria**: exit codes follow the family-wide taxonomy in
+**Acceptance Criteria**: exit codes follow the taxonomy in
 [ADR 0001](adr/0001-exit-code-taxonomy.md), and the per-command sets are
-declared as data (`internal/output/exitcodes.go`) with a conformance test.
+declared as data (`internal/output/exitcodes.go`) with a conformance test. The
+`schema` command is that registry's runtime projection, so a consumer can read
+the declared codes — per command and as a union — without parsing this document.
 
 - WHEN a command succeeds, the system shall exit `0`.
 - WHERE change-assertion is requested and a command makes no change, the system
@@ -323,13 +325,15 @@ README carries an "Acknowledgement" rather than the upstream's MIT
 | `unenroll`     | Delete remote host, remove local config.                                |
 | `run`          | `install` → daemon, await socket → `enroll`; unenroll on signal.        |
 | `write-config` | Persist current env config to a `0600` key-value file.                  |
+| `schema`       | Print the command, exit-code and error surface as JSON (ADR 0005).      |
 
 Dropped from upstream: `start`, `stop`, `restart`, `enable` (systemctl wrappers —
 now the module's job), `reenroll` (compose `unenroll` + `enroll` explicitly), and
 the `DN_MIRROR_IP` feature and cloud-provider metadata lookups.
 
 Global flags: `--env-file <path>`, `--force` (on `enroll`), `--assert-changed`,
-`--log-text`.
+`--log-level error|warn|info|debug` (default `warn`), `--quiet` (raises the floor
+to `error`, overriding `--log-level`).
 
 ### 2.3 Configuration variables
 
@@ -352,11 +356,16 @@ Global flags: `--env-file <path>`, `--force` (on `enroll`), `--assert-changed`,
 | `DN_CLIENT_CONFIG_DIR`  | `/var/lib/defined`          | dnclient config root; `<network>/dnclient.yml` here.|
 | `DN_CLIENT_SOCKET`      | derived from `<network>`    | dnclient control socket; `run` waits on it.         |
 | `DN_CLIENT_VERSION`     | `latest`                    | Module pins a specific version.                     |
-| `DN_LOG_LEVEL`          | `info`                      |                                                     |
+| `DN_LOG_LEVEL`          | `warn`                      | Env fallback for `--log-level`.                     |
 | `DN_SKIP_UNENROLL`      | `false`                     | Consumed by the module's stop wiring (see §2.7).    |
 | `DN_UNENROLL_ON_REBOOT` | `false`                     | Consumed by the module's stop wiring (see §2.7).    |
 
 Precedence: live environment variables override values loaded from `--env-file`.
+
+`DN_LOG_LEVEL` is the exception: the logger is constructed before configuration
+loads, so that a configuration failure can be reported, and its level is
+therefore read from the environment only. `--log-level` overrides it, `--quiet`
+overrides both, and the value is still round-tripped by `write-config`.
 
 ### 2.4 Enrollment state machine
 
@@ -366,7 +375,7 @@ sequence of side effects (addresses upstream bug B4 / finding D7):
 
 | Local config | Remote record       | Action                                                          |
 | ------------ | ------------------- | --------------------------------------------------------------- |
-| present      | (not checked)       | No-op, "already enrolled". Exit 0 (or 2 w/ `--assert-changed`). |
+| present      | (not checked)       | No-op, "already enrolled". Exit 0 (or 1 w/ `--assert-changed`). |
 | absent       | absent              | Create record → get code → `dnclient enroll`.                   |
 | absent       | present             | **Orphan.** Fail w/ guidance, unless `--force`.                 |
 | absent       | present + `--force` | DELETE stale record → create fresh → enroll.                    |
@@ -538,25 +547,81 @@ wiring, and that a reboot leaves the host enrolled.
 
 ### 2.8 Output contract
 
-- **stdout:** one JSON object per command result, e.g.
-  `{"action":"enroll","changed":true,"hostId":"host-…","network":"defined"}`.
-- **stderr:** one JSON object per error.
+- **stdout:** one newline-terminated JSON result envelope per command, opening with
+  the `schema_version`/`ok` head (ADR 0005) followed by the command payload, e.g.
+
+  ```json
+  {
+    "schema_version": 1,
+    "ok": true,
+    "action": "enroll",
+    "changed": true,
+    "host_id": "host-…",
+    "network": "defined"
+  }
+  ```
+
+  emitted on a single line. `host_id` and `network` are omitted when empty;
+  `action` and `changed` are always present.
+- **stderr:** one newline-terminated JSON error envelope per failure, and nothing
+  on stdout (ADR 0005), emitted on a single line:
+
+  ```json
+  {
+    "schema_version": 1,
+    "ok": false,
+    "error": {
+      "code": "dnclient_failed",
+      "message": "dnclient invocation failed: dnclient enroll: exit status 3",
+      "hint": "check the dnclient logs",
+      "details": { "exit_status": 3 }
+    }
+  }
+  ```
+
+  `code` is the failure's stable `snake_case` machine code, `hint` its remediation
+  advice, and `details` its structured payload; the last two are omitted when the
+  error carries none, and an unclassified error renders as `internal_error`
+  (exit 70). A bare `dn-tool` is a usage error (`no_command`, exit 64) rather than
+  a help banner on stdout; an explicit `--help` or `--version` still writes to
+  stdout and exits 0.
+- **The envelope is for failures only.** A non-zero exit is not by itself a
+  failure: a result-class exit (`1`, the `--assert-changed` no-op) and a signal
+  exit (`130`/`143`, a graceful shutdown per Requirement 5) write **no error
+  envelope**. The no-op still writes its `ok:true` result envelope to stdout,
+  and a signal shutdown leaves stderr to log records alone, so the two streams
+  can never contradict each other with an `ok:true` result beside an `ok:false`
+  error about the same invocation. These statuses are declared as such in the
+  code (`terr.NewStatus`) rather than inferred from the number, because
+  `130`/`143` sit above the failure range while the daemon exit-status
+  passthrough may take any value and *is* a failure. The `schema` command
+  reports them in a `statuses` list parallel to `errors`, each with its code,
+  exit code and meaning.
 - API key and enrollment codes are never logged (fixes upstream SEC5). Enrollment
   codes are used in-memory only.
 
-### 2.9 Internal structure (tentative)
+### 2.9 Internal structure
 
 ```txt
 dn-tool/
   cmd/
     dn-tool/
-      main.go                 # urfave/cli wiring, flag/env binding
+      main.go             # process entry point: argv in, exit code out
   internal/
+    command/              # urfave/cli wiring and the Run(args, deps) int delegate
     config/               # env + --env-file loading, precedence, validation
     api/                  # defined.net REST client (status checks, retry/backoff)
-    dnclient/             # download/verify/install + subprocess invocation (interface)
-    enroll/               # the state machine (§2.4)
-    output/               # JSON result writer + slog setup
+    dninstall/            # dnclient download, checksum verification, atomic install
+    dnclient/             # dnclient subprocess invocation (interface)
+    dnstate/              # local dnclient config-root state (presence, host id)
+    enroll/               # the enrollment state machine (§2.4)
+    unenroll/             # the unenrollment path
+    run/                  # the run lifecycle: daemon supervision and signals
+    output/               # JSON result + error envelope writers, exit-code registry
+    terr/                 # coded errors (ADR 0002)
+    logctx/               # logger construction and its context carrier
+    version/              # build version reporting
+  e2e/                    # exec-level suite: the built binary as a real process
   go.mod
   go.sum
   flake.nix
@@ -571,13 +636,15 @@ dn-tool/
 ### 2.10 CLI / libraries
 
 - CLI framework: `urfave/cli` (Q22 → C).
-- Logging: `log/slog`, JSON handler default (Q23 → A, JSON everywhere).
+- Logging: `log/slog`, handler chosen by destination: text at a terminal, JSON
+  otherwise (Q23 → A, revised by ADR 0004).
 - YAML: `gopkg.in/yaml.v3` (host-id parsing only).
 - HTTP/retry: `hashicorp/go-retryablehttp` wrapping stdlib `net/http`. Its
   default `CheckRetry`/`Backoff` already encode the Requirement 9 policy — retry
   on 5xx/429/connection errors, never on 4xx, exponential backoff — and it honors
   `context.Context` for the `DN_API_TIMEOUT` deadline. Tune `RetryMax`,
-  `RetryWaitMin`, `RetryWaitMax`; route its logger through `slog`. Use
+  `RetryWaitMin`, `RetryWaitMax`; route its logger through the injected
+  `*slog.Logger` (`api.WithLogger`). Use
   `client.StandardClient()` to hand a plain `*http.Client` to the typed API
   layer. (Pulls in `go-cleanhttp` + `go-hclog`; acceptable.)
 
@@ -588,6 +655,11 @@ dn-tool/
   §2.4 table, plus `--force`), config precedence, arch mapping, checksum
   verification against the published `.sha256` (match / mismatch / fetch
   failure), and exit-code semantics.
+- An exec-level suite (`e2e/`) that builds the binary and drives it as a real
+  process against a fake API and a `dnclient` stand-in, for the contract no
+  in-process harness can reach: a real SIGTERM/SIGINT exits `143`/`130` after
+  unenrolling and writes no error envelope. See
+  [the e2e plan](specs/e2e-testing.md).
 - A NixOS VM test (`nixosTest`) for module integration to validate service
   ordering, enroll-on-boot, and unenroll-on-stop — including the reboot-vs-poweroff
   spike from §2.7.

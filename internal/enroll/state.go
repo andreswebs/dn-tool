@@ -39,7 +39,7 @@ type Deps struct {
 // local dnclient config and the remote API host record.
 //
 //   - Local config present → already enrolled: no changes, no API or dnclient
-//     calls, Changed=false (exit 0, or exit 2 under --assert-changed).
+//     calls, Changed=false (exit 0, or exit 1 under --assert-changed).
 //   - Local absent + remote absent → create the remote host record, obtain the
 //     single-use enrollment code, and run `dnclient enroll` with it.
 //   - Local absent + remote present → orphan: fail with guidance to re-run with
@@ -51,10 +51,11 @@ type Deps struct {
 // case where the subprocess itself fails (the §2.5 enroll-path orphan).
 func Enroll(ctx context.Context, cfg *config.Config, deps Deps) (output.Result, error) {
 	// Role/port/static-address gates run first, so a misconfigured host fails
-	// fast and creates no remote record (design Req 3). A role/param violation is
-	// a configuration error (EX_CONFIG, ADR 0001).
+	// fast and creates no remote record (design Req 3). validateRoles and
+	// newEnrollInput raise their own coded errors (ErrRoleConflict,
+	// ErrMissingRequiredConfig), both EX_CONFIG per ADR 0001.
 	if err := validateRoles(cfg); err != nil {
-		return output.Result{}, output.Classify(err, output.CodeConfig)
+		return output.Result{}, err
 	}
 
 	if dnstate.ConfigExists(deps.ConfigRoot, cfg.NetworkName) {
@@ -63,7 +64,7 @@ func Enroll(ctx context.Context, cfg *config.Config, deps Deps) (output.Result, 
 
 	in, err := newEnrollInput(cfg)
 	if err != nil {
-		return output.Result{}, output.Classify(err, output.CodeConfig)
+		return output.Result{}, err
 	}
 
 	// Is the enrollment name already taken remotely? findRemoteRecord hides the
@@ -79,7 +80,7 @@ func Enroll(ctx context.Context, cfg *config.Config, deps Deps) (output.Result, 
 		// under the same name elsewhere, so default to failing with guidance and
 		// gate the destructive recovery behind --force (§2.4 rows 3–4).
 		if !deps.Force {
-			return output.Result{}, fmt.Errorf("remote host record %q (id %s) already exists but no local config is present (orphaned enrollment); re-run with --force to delete the stale record and enroll afresh", existing.Name, existing.ID)
+			return output.Result{}, ErrOrphanedEnrollment.Wrap(fmt.Errorf("remote host record %q (id %s) already exists but no local config is present; re-run with --force to delete the stale record and enroll afresh", existing.Name, existing.ID))
 		}
 		if err := deps.API.DeleteHost(ctx, existing.ID); err != nil {
 			return output.Result{}, fmt.Errorf("deleting stale host record %s: %w", existing.ID, err)
@@ -96,7 +97,7 @@ func Enroll(ctx context.Context, cfg *config.Config, deps Deps) (output.Result, 
 		// response is the same retry guidance, not an auto-delete loop.
 		var apiErr *api.APIError
 		if errors.As(err, &apiErr) && apiErr.Has("ERR_DUPLICATE_VALUE", "name") {
-			return output.Result{}, fmt.Errorf("remote host record %q already exists but no local config is present (orphaned enrollment); re-run with --force to delete the stale record and enroll afresh", in.Request.Name)
+			return output.Result{}, ErrOrphanedEnrollment.Wrap(fmt.Errorf("remote host record %q already exists but no local config is present; re-run with --force to delete the stale record and enroll afresh", in.Request.Name))
 		}
 		return output.Result{}, fmt.Errorf("creating host record: %w", err)
 	}

@@ -12,13 +12,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/andreswebs/dn-tool/internal/api"
+	"github.com/andreswebs/dn-tool/internal/config"
+	"github.com/andreswebs/dn-tool/internal/logctx"
 	"github.com/andreswebs/dn-tool/internal/output"
 )
 
@@ -82,7 +83,7 @@ func Install(ctx context.Context, deps InstallDeps, opts InstallOptions) (output
 	if err != nil {
 		return output.Result{}, err
 	}
-	slog.Default().Debug("install decision", "path", binPath, "version", res.Version, "needsInstall", need, "reason", reason)
+	logctx.From(ctx).Debug("install decision", "path", binPath, "version", res.Version, "needsInstall", need, "reason", reason)
 	if !need {
 		return output.Result{Action: "install", Changed: false}, nil
 	}
@@ -100,16 +101,16 @@ func Install(ctx context.Context, deps InstallDeps, opts InstallOptions) (output
 // so a download or verify failure never leaves a partial file and finalPath only
 // ever changes via the rename of a fully verified binary.
 func placeBinary(ctx context.Context, httpClient *http.Client, r resolved, finalPath string) error {
-	// Every local filesystem step here is an I/O failure class (EX_IOERR, ADR
-	// 0001); downloadAndVerify carries its own IO/data classification.
+	// Every local filesystem step here is config.ErrFileIO (EX_IOERR, ADR 0001);
+	// downloadAndVerify carries its own IO/data classification.
 	binDir := filepath.Dir(finalPath)
 	if err := os.MkdirAll(binDir, 0o755); err != nil {
-		return output.Classify(fmt.Errorf("creating bin dir %s: %w", binDir, err), output.CodeIO)
+		return config.ErrFileIO.Wrap(fmt.Errorf("creating bin dir %s: %w", binDir, err))
 	}
 
 	tmp, err := os.CreateTemp(binDir, filepath.Base(finalPath)+".tmp-*")
 	if err != nil {
-		return output.Classify(fmt.Errorf("creating temp file in %s: %w", binDir, err), output.CodeIO)
+		return config.ErrFileIO.Wrap(fmt.Errorf("creating temp file in %s: %w", binDir, err))
 	}
 	tmpPath := tmp.Name()
 	// Cleaned up on every failure path before the rename; a no-op (ENOENT) once
@@ -122,16 +123,16 @@ func placeBinary(ctx context.Context, httpClient *http.Client, r resolved, final
 	}
 	if err := tmp.Sync(); err != nil {
 		_ = tmp.Close()
-		return output.Classify(fmt.Errorf("syncing %s: %w", tmpPath, err), output.CodeIO)
+		return config.ErrFileIO.Wrap(fmt.Errorf("syncing %s: %w", tmpPath, err))
 	}
 	if err := tmp.Close(); err != nil {
-		return output.Classify(fmt.Errorf("closing %s: %w", tmpPath, err), output.CodeIO)
+		return config.ErrFileIO.Wrap(fmt.Errorf("closing %s: %w", tmpPath, err))
 	}
 	if err := os.Chmod(tmpPath, 0o755); err != nil {
-		return output.Classify(fmt.Errorf("setting executable bit on %s: %w", tmpPath, err), output.CodeIO)
+		return config.ErrFileIO.Wrap(fmt.Errorf("setting executable bit on %s: %w", tmpPath, err))
 	}
 	if err := os.Rename(tmpPath, finalPath); err != nil {
-		return output.Classify(fmt.Errorf("placing dnclient at %s: %w", finalPath, err), output.CodeIO)
+		return config.ErrFileIO.Wrap(fmt.Errorf("placing dnclient at %s: %w", finalPath, err))
 	}
 	return nil
 }
@@ -162,7 +163,7 @@ func needsInstall(path, expectedDigest string) (need bool, reason string, err er
 		if errors.Is(err, os.ErrNotExist) {
 			return true, "no binary at target path", nil
 		}
-		return false, "", output.Classify(fmt.Errorf("inspecting installed dnclient %s: %w", path, err), output.CodeIO)
+		return false, "", config.ErrFileIO.Wrap(fmt.Errorf("inspecting installed dnclient %s: %w", path, err))
 	}
 	if actual == strings.ToLower(strings.TrimSpace(expectedDigest)) {
 		return false, "installed binary matches expected checksum", nil

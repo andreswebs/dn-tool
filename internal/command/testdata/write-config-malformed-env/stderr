@@ -1,0 +1,1 @@
+{"schema_version":1,"ok":false,"error":{"code":"config_error","message":"invalid configuration: DN_LISTEN_PORT: strconv.Atoi: parsing \"not-a-number\": invalid syntax","hint":"correct the DN_* variable named in the message; see docs/dn-tool-design.md §2.3 for accepted values"}}

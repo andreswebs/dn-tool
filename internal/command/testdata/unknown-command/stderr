@@ -1,0 +1,1 @@
+{"schema_version":1,"ok":false,"error":{"code":"unknown_command","message":"unknown command: \"bogus\"","hint":"run `dn-tool --help` for the list of commands"}}

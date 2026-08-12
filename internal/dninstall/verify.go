@@ -8,8 +8,6 @@ import (
 	"io"
 	"net/http"
 	"strings"
-
-	"github.com/andreswebs/dn-tool/internal/output"
 )
 
 // downloadAndVerify downloads the dnclient binary described by r and verifies it
@@ -29,25 +27,25 @@ func downloadAndVerify(ctx context.Context, httpClient *http.Client, r resolved,
 		return err
 	}
 
-	// Fetching and streaming the binary are network/local I/O (EX_IOERR, ADR
-	// 0001); the checksum mismatch below is a data-integrity failure (EX_DATAERR).
+	// Fetching and streaming the binary are ErrDownloadIO (EX_IOERR, ADR 0001);
+	// the checksum mismatch below is a data-integrity failure (EX_DATAERR).
 	resp, err := get(ctx, httpClient, r.URL)
 	if err != nil {
-		return output.Classify(fmt.Errorf("downloading dnclient binary: %w", err), output.CodeIO)
+		return ErrDownloadIO.Wrap(fmt.Errorf("downloading dnclient binary: %w", err))
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return output.Classify(fmt.Errorf("downloading dnclient binary %s: unexpected status %d", r.URL, resp.StatusCode), output.CodeIO)
+		return ErrDownloadIO.Wrap(fmt.Errorf("downloading dnclient binary %s: unexpected status %d", r.URL, resp.StatusCode))
 	}
 
 	hasher := sha256.New()
 	if _, err := io.Copy(dest, io.TeeReader(resp.Body, hasher)); err != nil {
-		return output.Classify(fmt.Errorf("streaming dnclient binary: %w", err), output.CodeIO)
+		return ErrDownloadIO.Wrap(fmt.Errorf("streaming dnclient binary: %w", err))
 	}
 
 	actual := hex.EncodeToString(hasher.Sum(nil))
 	if actual != expected {
-		return output.Classify(fmt.Errorf("dnclient checksum mismatch: published %s, computed %s", expected, actual), output.CodeData)
+		return ErrChecksumMismatch.Wrap(fmt.Errorf("published %s, computed %s", expected, actual))
 	}
 	return nil
 }
@@ -59,23 +57,23 @@ func downloadAndVerify(ctx context.Context, httpClient *http.Client, r resolved,
 func fetchChecksum(ctx context.Context, httpClient *http.Client, url string) (string, error) {
 	resp, err := get(ctx, httpClient, url)
 	if err != nil {
-		return "", output.Classify(fmt.Errorf("fetching dnclient checksum: %w", err), output.CodeIO)
+		return "", ErrDownloadIO.Wrap(fmt.Errorf("fetching dnclient checksum: %w", err))
 	}
 	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
-		return "", output.Classify(fmt.Errorf("fetching dnclient checksum %s: unexpected status %d", url, resp.StatusCode), output.CodeIO)
+		return "", ErrDownloadIO.Wrap(fmt.Errorf("fetching dnclient checksum %s: unexpected status %d", url, resp.StatusCode))
 	}
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", output.Classify(fmt.Errorf("reading dnclient checksum: %w", err), output.CodeIO)
+		return "", ErrDownloadIO.Wrap(fmt.Errorf("reading dnclient checksum: %w", err))
 	}
 
 	// A checksum whose body is not a 64-char hex digest is malformed published
 	// data (EX_DATAERR), distinct from an I/O failure fetching it.
 	digest := strings.ToLower(strings.TrimSpace(string(body)))
 	if _, err := hex.DecodeString(digest); err != nil || len(digest) != sha256.Size*2 {
-		return "", output.Classify(fmt.Errorf("malformed dnclient checksum %q from %s", digest, url), output.CodeData)
+		return "", ErrChecksumMalformed.Wrap(fmt.Errorf("checksum %q from %s", digest, url))
 	}
 	return digest, nil
 }

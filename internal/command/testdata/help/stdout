@@ -1,0 +1,25 @@
+NAME:
+   dn-tool - enroll and unenroll Linux hosts in a defined.net Managed Nebula network
+
+USAGE:
+   dn-tool [global options] [command [command options]]
+
+VERSION:
+   $VERSION
+
+COMMANDS:
+   install       download and verify dnclient into the binary directory
+   enroll        create the remote host record and run dnclient enroll
+   unenroll      delete the remote host record and remove local config
+   run           install, enroll, then run dnclient; unenroll on termination
+   write-config  persist the current environment configuration to a 0600 file
+   schema        print the machine-readable command, exit-code and error surface
+   help, h       Shows a list of commands or help for one command
+
+GLOBAL OPTIONS:
+   --env-file FILE                    load configuration from key-value FILE [$DN_ENV_FILE]
+   --assert-changed                   exit non-zero (distinct, non-error) when the command makes no change
+   --log-level error|warn|info|debug  diagnostic verbosity on stderr: error|warn|info|debug (default: "warn")
+   --quiet                            log only errors; overrides --log-level
+   --help, -h                         show help
+   --version, -v                      print the version

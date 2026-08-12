@@ -1,7 +1,7 @@
 package enroll
 
 import (
-	"fmt"
+	"errors"
 
 	"github.com/andreswebs/dn-tool/internal/config"
 )
@@ -14,17 +14,21 @@ import (
 //   - lighthouse and relay are mutually exclusive;
 //   - a lighthouse requires at least one static address (DN_STATIC_ADDRESSES);
 //   - a lighthouse or relay requires a non-zero listen port (DN_LISTEN_PORT).
+//
+// Every violation is ErrRoleConflict, so the exit boundary classifies the whole
+// role surface as one configuration failure (EX_CONFIG) while the wrapped cause
+// names which rule was broken.
 func validateRoles(cfg *config.Config) error {
 	if cfg.IsLighthouse && cfg.IsRelay {
-		return fmt.Errorf("host configured as both lighthouse (DN_IS_LIGHTHOUSE) and relay (DN_IS_RELAY); these are mutually exclusive")
+		return ErrRoleConflict.Wrap(errors.New("host configured as both lighthouse (DN_IS_LIGHTHOUSE) and relay (DN_IS_RELAY); these are mutually exclusive"))
 	}
 
 	if cfg.IsLighthouse && len(cfg.StaticAddrs) == 0 {
-		return fmt.Errorf("lighthouse requires at least one static address (DN_STATIC_ADDRESSES)")
+		return ErrRoleConflict.Wrap(errors.New("lighthouse requires at least one static address (DN_STATIC_ADDRESSES)"))
 	}
 
 	if (cfg.IsLighthouse || cfg.IsRelay) && cfg.ListenPort == 0 {
-		return fmt.Errorf("lighthouse/relay requires a non-zero listen port (DN_LISTEN_PORT)")
+		return ErrRoleConflict.Wrap(errors.New("lighthouse/relay requires a non-zero listen port (DN_LISTEN_PORT)"))
 	}
 
 	return nil

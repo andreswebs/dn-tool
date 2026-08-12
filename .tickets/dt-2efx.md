@@ -1,8 +1,8 @@
 ---
 id: dt-2efx
-status: open
+status: closed
 deps: []
-links: []
+links: [dt-cjgq, dt-nljm, dt-nrq1]
 created: 2026-08-12T13:21:42Z
 type: task
 priority: 1
@@ -250,3 +250,22 @@ dt-o9hi.
 ## Do not commit
 
 Leave git commits and branching to the repo owner.
+
+## Notes
+
+**2026-08-12T14:46:22Z**
+
+Implemented internal/terr (Coded/Detailed/E, New with duplicate-code panic, Newf, All, Wrap/WithDetails copies, Is-by-code) plus the full 25-sentinel inventory. All 33 output.Classify call sites are gone from non-test code — including the two the ticket's table omitted (internal/command/commands.go result-write failure and internal/unenroll/unenroll.go local-config removal), both mapped to config.ErrFileIO (74, no behavior change). output.Classify/ExitError/ResolveExitCode are untouched and still back the boundary; dt-uq9d deletes them.
+
+Deviations and judgment calls worth knowing:
+- ErrFileIO is raised by four packages (config, dninstall, unenroll, command), so it is declared once in internal/config/errors.go (lowest package in the import graph) and referenced as config.ErrFileIO elsewhere. One machine code, one meaning; the per-package errors.go rule is the default, not an invariant. dninstall now imports config.
+- ErrInternal (internal_error, 70) from the planning doc's inventory is NOT declared: it is the ExitCodeFor fallback, which is dt-uq9d's. ErrNoCommand IS declared but unwired (dt-nljm).
+- validateRoles and missingParam now raise their coded errors at origin (validate.go / enroll.go) rather than being classified at state.go:57/:66, which just return err.
+- Sentinel messages are class labels and the specific detail rides in the wrapped cause, so Error() reads 'class: detail'. This changes some message text (e.g. 'no published dnclient download: version "1.2.3" is not in the downloads table'). All existing substring assertions still pass.
+- run.exitErr.Error() returns the cause's message, not the class label, preserving the old output.ExitError behavior at the boundary.
+
+All pre-existing exit-code expectations pass unmodified (output/exitcodes_test.go, command/exit_conformance_test.go, run/signal_test.go, run/run_test.go). New tests: write-config with no path -> 64; orphan (both the pre-check and the create-time duplicate backstop) -> 78 + ErrOrphanedEnrollment; malformed API response (single + list envelope) -> 65; dnclient exit 3 -> 74 with details.exit_status=3, action context retained and *exec.ExitError still reachable; run still propagating 3 through a coded daemon error; an inventory conformance test in internal/command (snake_case codes, unique, taxonomy exit codes, non-empty message and hint) — it lives there because that package links every raising package, so terr.All() is fully populated.
+
+Carried forward, not acted on (per the ticket): not_enrolled stays 74, so 'unenroll a host that was never enrolled' still surfaces as an I/O error. Reconsider when the class list is next revisited.
+
+Also fixed the stale 'exit 2 under --assert-changed' doc comment in internal/enroll/state.go (contradiction row 17), and corrected the dt-7lys learning in docs/specs/learnings.md that reasoned Classify's ExitCoder deferral was safe — it was the source of the enroll exit-status leak.

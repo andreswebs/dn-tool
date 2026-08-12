@@ -1,8 +1,8 @@
 ---
 id: dt-nljm
-status: open
+status: closed
 deps: [dt-uq9d]
-links: []
+links: [dt-cjgq, dt-2efx, dt-nrq1]
 created: 2026-08-12T13:21:42Z
 type: task
 priority: 1
@@ -159,3 +159,21 @@ on dt-w86c and dt-2efx. Blocks dt-cjgq, dt-o9hi.
 ## Do not commit
 
 Leave git commits and branching to the repo owner.
+
+## Notes
+
+**2026-08-12T15:03:43Z**
+
+Implemented the ADR 0002/0005 stderr error envelope.
+
+Code:
+- New internal/output/error.go: SchemaVersion = 1 const, errorEnvelope/errorDetail structs, EmitError(w, err). Code+hint from terr.Coded, details from terr.Detailed, internal_error fallback for an unclassified error, best-effort write, one-retry degrade that drops an unmarshalable details payload. HTML escaping is disabled (Encoder.SetEscapeHTML(false)) so hints containing <command> stay readable; output.WriteResult still escapes, so dt-djf3 should align it.
+- SchemaVersion lives here because the envelope needs it and dt-djf3 (which owns the result head) is parallel, not a dependency: dt-djf3 should reuse this const rather than declaring a second one.
+- internal/command/run.go: exitCode now calls output.EmitError instead of Fprintln; the msg != "" guard is gone (no sentinel has an empty message).
+- internal/command/root.go: rootAction returns ErrNoCommand for a bare invocation instead of cli.ShowRootCommandHelp, so nothing lands on stdout. neutralize() already covered the subcommands' help-on-error path; verified by test, no change needed there.
+
+Tests: internal/output/error_test.go (shape, head-first byte order, unclassified, omitempty, classification through a wrapper, unmarshalable details, nil error, failing writer, no HTML escaping) and internal/command/error_envelope_test.go (one envelope per exit class 64/65/69/74/78 + unclassified; a real dnclient child exiting 3 rendering the full message with details.exit_status=3 through the ExecClient; empty stdout on four failure paths; bare invocation -> 64 no_command; --help/--version/subcommand --help exemption). exit_conformance_test.go's bare-invocation subtest is the only pre-existing expectation changed (0 -> 64), as the ticket predicted.
+
+Judgement call worth knowing for dt-cjgq: --assert-changed's no-op (exit 1, ErrNoChange) now emits a no_change envelope with ok:false on stderr while the result object still goes to stdout, because it reaches the boundary as a non-nil error. That mirrors the previous plain-text behavior and gives a polling consumer the code, but it is the one case where the two streams disagree about ok; pin it explicitly in the golden triples.
+
+Docs: design §2.8 stderr line replaced with the concrete shape, CHANGELOG Unreleased/Changed (breaking) entries for the envelope and the bare-invocation change, the ADR 0002 Added entry's 'not yet emitted' caveat dropped, docs/specs/e2e-testing.md unknown-command case updated, learnings.md section added. make build green (fmt-check, vet, lint 0 issues, test, build); verified against the built binary.

@@ -9,7 +9,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -18,15 +17,9 @@ import (
 
 	"github.com/andreswebs/dn-tool/internal/config"
 	"github.com/andreswebs/dn-tool/internal/dnclient"
+	"github.com/andreswebs/dn-tool/internal/logctx"
 	"github.com/andreswebs/dn-tool/internal/output"
 )
-
-// errSignalShutdown is the non-nil sentinel attached to a clean signal-triggered
-// shutdown so the 130/143 exit code has an error to carry: a graceful shutdown
-// returns nil from runAndUnenroll, and output.ExitError(nil, …) collapses to a
-// true nil interface, so signalling the distinct signal status needs a real
-// error to attach.
-var errSignalShutdown = errors.New("terminated by signal")
 
 // defaultUnenrollTimeout bounds the signal-driven unenroll when Deps.UnenrollTimeout
 // is unset. It mirrors the unenroll command's own default (design §2.3/§2.5) and
@@ -183,15 +176,15 @@ func finalize(err error, sigCh <-chan os.Signal) error {
 	}
 }
 
-// withSignalExitCode wraps err (or the errSignalShutdown sentinel when the
+// withSignalExitCode wraps err (or the ErrSignalShutdown sentinel when the
 // shutdown was clean) with the 128+signum exit code for sig, which becomes the
 // outermost code and therefore wins over any inner class or unenroll-failure
-// code (ResolveExitCode reads the first ExitCoder in the chain).
+// code (the boundary reads the first coded error in the chain).
 func withSignalExitCode(err error, sig os.Signal) error {
 	if err == nil {
-		err = errSignalShutdown
+		err = ErrSignalShutdown
 	}
-	return output.ExitError(err, signalExitCode(sig))
+	return newExitErr(ErrSignalShutdown, signalExitCode(sig), err)
 }
 
 // signalExitCode maps a caught termination signal to its 128+signum exit code
@@ -228,6 +221,11 @@ func signalExitCode(sig os.Signal) int {
 // daemon-died-on-its-own check is therefore gated on ctx.Err() == nil. When the
 // daemon exits cleanly and unenroll fails, the unenroll error is returned; both
 // clean → nil → 0.
+//
+// The one exception to "returned" is an unenroll failure during a signalled
+// shutdown: the signal code wins and its status writes no error envelope
+// (dt-nrq1), so that failure is logged rather than returned — exactly as design
+// Req 5 specifies — instead of being returned into a stream that will not print it.
 func runAndUnenroll(ctx context.Context, cfg *config.Config, deps Deps) error {
 	enrolled, daemonErr := Run(ctx, cfg, deps)
 
@@ -249,15 +247,33 @@ func runAndUnenroll(ctx context.Context, cfg *config.Config, deps Deps) error {
 
 	if ctx.Err() == nil && daemonErr != nil {
 		if unenrollErr != nil {
-			slog.Error("unenroll failed during shutdown; host may still be enrolled", "error", unenrollErr.Error())
+			logDroppedUnenrollFailure(ctx, unenrollErr)
 		}
-		return output.ExitError(daemonErr, daemonExitCode(daemonErr))
+		return newExitErr(ErrDaemonExit, daemonExitCode(daemonErr), daemonErr)
 	}
 	if unenrollErr != nil {
-		slog.Error("unenroll failed during shutdown; host may still be enrolled", "error", unenrollErr.Error())
+		if ctx.Err() != nil {
+			// A signalled shutdown: the signal code governs the exit status and
+			// no error envelope is written for it (design Req 5, dt-nrq1), so
+			// returning this error would report nothing anywhere. Logging it is
+			// therefore the single handling it gets.
+			logDroppedUnenrollFailure(ctx, unenrollErr)
+			return nil
+		}
+		// Returned, therefore not logged: the error envelope carries the message,
+		// and handling a failure once is the rule (ADR 0002/0004).
 		return unenrollErr
 	}
 	return nil
+}
+
+// logDroppedUnenrollFailure records an unenroll failure that does not reach the
+// error envelope, because the exit status is governed by something that outranks
+// it: the daemon's own code, or the shutdown signal. The log record is its only
+// trace, and without it a host left enrolled would fail silently.
+func logDroppedUnenrollFailure(ctx context.Context, err error) {
+	logctx.From(ctx).Error("unenroll failed during shutdown; host may still be enrolled",
+		"error", err.Error())
 }
 
 // daemonExitCode maps the foreground daemon's termination error onto a process

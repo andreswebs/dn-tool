@@ -1,6 +1,6 @@
 ---
 id: dt-69kx
-status: open
+status: closed
 deps: []
 links: []
 created: 2026-08-12T13:21:42Z
@@ -95,3 +95,30 @@ compile - per `docs/agents/build-and-validation.md`. Do not silence lint with
 ## Do not commit
 
 Leave git commits and branching to the repo owner throughout.
+
+## Notes
+
+**2026-08-12T15:56:31Z**
+
+Verify-and-close (zero code change). All nine children were already closed; this epic's terminal action was to confirm every acceptance bullet against reality rather than to write new code.
+
+Verified empirically on the freshly built binary (bin/dn-tool-linux-arm64):
+- Bare 'dn-tool' -> exit 64, JSON error envelope on stderr, code no_command.
+- 'write-config' with no path -> exit 64, code missing_argument (was 70).
+- Unknown command -> exit 64, code unknown_command.
+- 'dn-tool schema' -> exit 0, one JSON object opening with schema_version + ok, listing all six commands with their flags, declared exit codes and passes_through_child_exit_status, the global flag set, and the full 26-entry coded-error inventory with exit_code + hint per code.
+- Global flags: --log-level error|warn|info|debug (default warn) and --quiet present; --log-text absent.
+
+Verified by grep across the tree (excluding .tickets/, .local/ and docs/research/, whose historical references are expected):
+- No slog.SetDefault call site remains in Go source; only comments in logctx/dninstall/api/run/dnclient tests documenting that its removal must not silence those diagnostics.
+- No hostId identifier or literal in non-test Go source; the rename to host_id is complete.
+- No output.Classify call site; the ExitCoder boundary is gone, the sole surviving ExitCoder mention is the regression comment at internal/dnclient/client_test.go:131 recording defect 1.
+- Both epic defects are fixed and pinned: enroll's dnclient failure classifies as 74/dnclient_failed with details.exit_status, and the three unclassified-70 paths now map to 64/78/65.
+
+ADR 0006 harness in place: internal/command/testdata holds the golden-triple scenarios (bare-invocation, bad-global-flag, bad-log-level, bad-subcommand-flag, enroll-{success,orphaned,dnclient-failure,api-rejected,api-unavailable,api-malformed-response}, and more), with 87 RUN/PASS lines across the golden, conformance, schema, envelope and logging suites.
+
+ADR 0001 non-regression holds: the guard tests (internal/output/exitcodes_test.go, internal/command/exit_conformance_test.go, internal/run/signal_test.go, internal/run/run_test.go) all pass; note exit_conformance_test.go now lives under internal/command/, moved there by dt-w86c when the Run(args, deps) delegate absorbed the root command.
+
+CHANGELOG Unreleased already carries every breaking entry this epic promised, written by the owning child tickets; no CHANGELOG edit was needed here.
+
+make build green from the repo root (fmt-check, vet, lint 0 issues, test, compile). No files changed, nothing committed.

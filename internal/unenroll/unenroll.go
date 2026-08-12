@@ -4,7 +4,6 @@ package unenroll
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -22,13 +21,6 @@ type Input struct {
 	NetworkName string
 	APIKey      config.Secret
 }
-
-// ErrMissingAPIKey reports the absence of DN_API_KEY, which unenroll requires
-// before attempting unenrollment (design Req 4 / §2.3). It is checked before
-// ReadHostID so a keyless unenroll fails with this actionable error rather than
-// a not-enrolled one. The module owns this precondition, symmetric with enroll's
-// own in-module key check.
-var ErrMissingAPIKey = errors.New("DN_API_KEY is required to unenroll")
 
 // HostDeleter deletes a remote host record. *api.Client satisfies it; tests
 // substitute a fake. DeleteHost reports a 404 as nil (idempotent already-absent
@@ -62,16 +54,16 @@ const unenrollFailureAdvisory = "remote record may persist, local config retaine
 // delete, so a delete failure retains it and keeps the local/remote invariant
 // (design §2.5): no orphan is produced.
 func Unenroll(ctx context.Context, in Input, deps Deps) (output.Result, error) {
-	// A missing API key is a configuration error (EX_CONFIG, ADR 0001).
+	// A missing API key is ErrMissingAPIKey (EX_CONFIG, ADR 0001).
 	if in.APIKey == "" {
-		return output.Result{}, output.Classify(ErrMissingAPIKey, output.CodeConfig)
+		return output.Result{}, ErrMissingAPIKey
 	}
 
-	// Reading the recorded host ID from local dnclient state is local I/O
+	// Reading the recorded host ID from local dnclient state is ErrLocalState
 	// (EX_IOERR); a delete failure carries the API layer's own classification.
 	hostID, err := dnstate.ReadHostID(deps.ConfigRoot, in.NetworkName)
 	if err != nil {
-		return output.Result{}, output.Classify(err, output.CodeIO)
+		return output.Result{}, ErrLocalState.Wrap(err)
 	}
 
 	if err := deps.API.DeleteHost(ctx, hostID); err != nil {
@@ -80,7 +72,7 @@ func Unenroll(ctx context.Context, in Input, deps Deps) (output.Result, error) {
 
 	networkDir := filepath.Join(deps.ConfigRoot, in.NetworkName)
 	if err := os.RemoveAll(networkDir); err != nil {
-		return output.Result{}, output.Classify(fmt.Errorf("removing local config %s: %w", networkDir, err), output.CodeIO)
+		return output.Result{}, config.ErrFileIO.Wrap(fmt.Errorf("removing local config %s: %w", networkDir, err))
 	}
 
 	return output.Result{

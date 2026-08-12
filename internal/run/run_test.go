@@ -1,18 +1,24 @@
 package run
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os/exec"
 	"reflect"
+	"strings"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
 	"github.com/andreswebs/dn-tool/internal/config"
 	"github.com/andreswebs/dn-tool/internal/dnclient"
+	"github.com/andreswebs/dn-tool/internal/logctx"
 	"github.com/andreswebs/dn-tool/internal/output"
+	"github.com/andreswebs/dn-tool/internal/terr"
 )
 
 // exitErrorWithCode runs a trivial subprocess that exits with code, returning the
@@ -327,8 +333,10 @@ func TestRunAndUnenroll_SignalKilledDaemonOnShutdownExitsZero(t *testing.T) {
 	<-enrolled
 	cancel()
 
-	if got := output.ResolveExitCode(<-errc); got != output.CodeOK {
-		t.Fatalf("exit code = %d, want %d (graceful shutdown is not a failure)", got, output.CodeOK)
+	// No error at all, which the exit boundary reports as CodeOK: a graceful
+	// shutdown is not a failure.
+	if err := <-errc; err != nil {
+		t.Fatalf("runAndUnenroll error = %v, want nil (graceful shutdown is not a failure)", err)
 	}
 }
 
@@ -430,7 +438,7 @@ func TestRunAndUnenroll_InstallFailureSkipsUnenroll(t *testing.T) {
 	if !errors.Is(err, installErr) {
 		t.Fatalf("runAndUnenroll error = %v, want wrap of %v", err, installErr)
 	}
-	if got := output.ResolveExitCode(err); got != output.CodeInternal {
+	if got := output.ExitCodeFor(err); got != output.CodeInternal {
 		t.Fatalf("exit code = %d, want %d", got, output.CodeInternal)
 	}
 	want := []string{"install"}
@@ -459,7 +467,7 @@ func TestRunAndUnenroll_EnrollFailureStopsDaemonAndSkipsUnenroll(t *testing.T) {
 	if !errors.Is(err, enrollErr) {
 		t.Fatalf("runAndUnenroll error = %v, want wrap of %v", err, enrollErr)
 	}
-	if got := output.ResolveExitCode(err); got != output.CodeInternal {
+	if got := output.ExitCodeFor(err); got != output.CodeInternal {
 		t.Fatalf("exit code = %d, want %d", got, output.CodeInternal)
 	}
 	if rec.contains("unenroll") {
@@ -592,7 +600,7 @@ func TestRun_DaemonErrorPropagates(t *testing.T) {
 }
 
 // dt-r2ks behavior 1: the daemon exits with code N → runAndUnenroll returns an
-// error that maps (via output.ResolveExitCode) to exit N, so a supervisor sees
+// error that maps (via output.ExitCodeFor) to exit N, so a supervisor sees
 // the daemon's real result. The daemon error stays in the chain.
 func TestRunAndUnenroll_DaemonExitCodePropagated(t *testing.T) {
 	rec := &recorder{}
@@ -608,7 +616,7 @@ func TestRunAndUnenroll_DaemonExitCodePropagated(t *testing.T) {
 	}
 
 	err := runAndUnenroll(context.Background(), testConfig(), deps)
-	if got := output.ResolveExitCode(err); got != 7 {
+	if got := output.ExitCodeFor(err); got != 7 {
 		t.Fatalf("exit code = %d, want 7", got)
 	}
 	if !errors.Is(err, daemonErr) {
@@ -632,12 +640,13 @@ func TestRunAndUnenroll_WrappedDaemonExitCodePropagated(t *testing.T) {
 		UnenrollTimeout: time.Second,
 	}
 
-	if got := output.ResolveExitCode(runAndUnenroll(context.Background(), testConfig(), deps)); got != 3 {
+	if got := output.ExitCodeFor(runAndUnenroll(context.Background(), testConfig(), deps)); got != 3 {
 		t.Fatalf("exit code = %d, want 3", got)
 	}
 }
 
-// dt-r2ks behavior 2: a clean daemon exit with a successful unenroll maps to 0.
+// dt-r2ks behavior 2: a clean daemon exit with a successful unenroll is not a
+// failure — no error, which the exit boundary reports as 0.
 func TestRunAndUnenroll_CleanDaemonExitMapsToZero(t *testing.T) {
 	rec := &recorder{}
 	ready, exit := make(chan struct{}), make(chan struct{})
@@ -650,8 +659,8 @@ func TestRunAndUnenroll_CleanDaemonExitMapsToZero(t *testing.T) {
 		UnenrollTimeout: time.Second,
 	}
 
-	if got := output.ResolveExitCode(runAndUnenroll(context.Background(), testConfig(), deps)); got != output.CodeOK {
-		t.Fatalf("exit code = %d, want %d", got, output.CodeOK)
+	if err := runAndUnenroll(context.Background(), testConfig(), deps); err != nil {
+		t.Fatalf("runAndUnenroll error = %v, want nil", err)
 	}
 }
 
@@ -672,7 +681,7 @@ func TestRunAndUnenroll_UnenrollFailureYieldsNonZeroOnCleanExit(t *testing.T) {
 	}
 
 	err := runAndUnenroll(context.Background(), testConfig(), deps)
-	if got := output.ResolveExitCode(err); got != output.CodeInternal {
+	if got := output.ExitCodeFor(err); got != output.CodeInternal {
 		t.Fatalf("exit code = %d, want %d", got, output.CodeInternal)
 	}
 	if !errors.Is(err, unenrollErr) {
@@ -696,7 +705,7 @@ func TestRunAndUnenroll_DaemonExitCodeDominatesUnenrollFailure(t *testing.T) {
 		UnenrollTimeout: time.Second,
 	}
 
-	if got := output.ResolveExitCode(runAndUnenroll(context.Background(), testConfig(), deps)); got != 5 {
+	if got := output.ExitCodeFor(runAndUnenroll(context.Background(), testConfig(), deps)); got != 5 {
 		t.Fatalf("exit code = %d, want 5 (daemon code dominates)", got)
 	}
 }
@@ -717,7 +726,7 @@ func TestRunAndUnenroll_NonExecDaemonErrorMapsToCodeInternal(t *testing.T) {
 		UnenrollTimeout: time.Second,
 	}
 
-	if got := output.ResolveExitCode(runAndUnenroll(context.Background(), testConfig(), deps)); got != output.CodeInternal {
+	if got := output.ExitCodeFor(runAndUnenroll(context.Background(), testConfig(), deps)); got != output.CodeInternal {
 		t.Fatalf("exit code = %d, want %d", got, output.CodeInternal)
 	}
 }
@@ -737,7 +746,194 @@ func TestRunAndUnenroll_SignalKilledDaemonMapsToCodeInternal(t *testing.T) {
 		UnenrollTimeout: time.Second,
 	}
 
-	if got := output.ResolveExitCode(runAndUnenroll(context.Background(), testConfig(), deps)); got != output.CodeInternal {
+	if got := output.ExitCodeFor(runAndUnenroll(context.Background(), testConfig(), deps)); got != output.CodeInternal {
 		t.Fatalf("exit code = %d, want %d (no negative/garbage code)", got, output.CodeInternal)
+	}
+}
+
+// dt-2efx: the daemon error now arrives coded (dnclient.ErrDNClientFailed, exit
+// 74), and run must still propagate the daemon's own status N — its wrapper is
+// the outermost coded error, so it wins over the inner class exactly as it did
+// over the bare *exec.ExitError before.
+func TestRunAndUnenroll_CodedDaemonErrorStillPropagatesExitStatus(t *testing.T) {
+	rec := &recorder{}
+	ready, exit := make(chan struct{}), make(chan struct{})
+	daemonErr := dnclient.ErrDNClientFailed.
+		Wrap(fmt.Errorf("dnclient run: %w", exitErrorWithCode(t, 3))).
+		WithDetails(map[string]any{"exit_status": 3})
+	deps := Deps{
+		Install:         recordingStep(rec, "install", nil),
+		Daemon:          &mockDaemon{rec: rec, ready: ready, exit: exit, err: daemonErr},
+		WaitReady:       readyWaiter(rec, ready),
+		Enroll:          enrollReleasing(rec, exit, nil),
+		Unenroll:        recordingUnenroll(rec, nil, nil),
+		UnenrollTimeout: time.Second,
+	}
+
+	err := runAndUnenroll(context.Background(), testConfig(), deps)
+	if got := output.ExitCodeFor(err); got != 3 {
+		t.Fatalf("exit code = %d, want 3 (run's outermost wrapper must win)", got)
+	}
+	if !errors.Is(err, ErrDaemonExit) {
+		t.Errorf("err = %v, want errors.Is ErrDaemonExit", err)
+	}
+	if !errors.Is(err, dnclient.ErrDNClientFailed) {
+		t.Errorf("the daemon's own coded error was dropped from the chain: %v", err)
+	}
+}
+
+// dt-uq9d: the outermost-wins invariant, asserted directly against the boundary
+// rather than through the lifecycle. run's daemon passthrough wraps an already
+// coded dnclient failure (74) to force the daemon's own status N; the boundary
+// must read the outer wrapper, or Req 5's passthrough silently becomes 74.
+func TestDaemonPassthroughWrapperOverridesInnerClassCode(t *testing.T) {
+	inner := dnclient.ErrDNClientFailed.Wrap(fmt.Errorf("dnclient run: %w", exitErrorWithCode(t, 3)))
+	if got := output.ExitCodeFor(inner); got != output.CodeIO {
+		t.Fatalf("fixture inner code = %d, want %d", got, output.CodeIO)
+	}
+
+	err := newExitErr(ErrDaemonExit, daemonExitCode(inner), inner)
+	if got := output.ExitCodeFor(err); got != 3 {
+		t.Errorf("exit code = %d, want 3 (the outer passthrough wrapper must win over the inner 74)", got)
+	}
+}
+
+// The signal shutdown carries its class code and the per-invocation 128+signum
+// exit code, so a consumer reads one machine code for both 130 and 143.
+func TestWithSignalExitCodeIsCodedSignalShutdown(t *testing.T) {
+	err := withSignalExitCode(nil, syscall.SIGINT)
+
+	if !errors.Is(err, ErrSignalShutdown) {
+		t.Fatalf("err = %v, want errors.Is ErrSignalShutdown", err)
+	}
+	var coded terr.Coded
+	if !errors.As(err, &coded) {
+		t.Fatal("the signal shutdown error must be coded")
+	}
+	if coded.Code() != "signal_shutdown" {
+		t.Errorf("Code() = %q, want %q", coded.Code(), "signal_shutdown")
+	}
+	if coded.ExitCode() != output.CodeSIGINT {
+		t.Errorf("ExitCode() = %d, want %d (the per-invocation code overrides the class)", coded.ExitCode(), output.CodeSIGINT)
+	}
+}
+
+// dt-cr62: the dropped unenroll failure keeps its only trace. When the daemon's
+// exit code dominates, the unenroll error never reaches the error envelope, so
+// silencing this record would lose a host left enrolled. The logger travels on
+// the context, so removing slog.SetDefault must not silence it.
+func TestRunAndUnenroll_DroppedUnenrollFailureIsLogged(t *testing.T) {
+	rec := &recorder{}
+	ready, exit := make(chan struct{}), make(chan struct{})
+	deps := Deps{
+		Install:         recordingStep(rec, "install", nil),
+		Daemon:          &mockDaemon{rec: rec, ready: ready, exit: exit, err: exitErrorWithCode(t, 5)},
+		WaitReady:       readyWaiter(rec, ready),
+		Enroll:          enrollReleasing(rec, exit, nil),
+		Unenroll:        recordingUnenroll(rec, nil, errors.New("unenroll boom")),
+		UnenrollTimeout: time.Second,
+	}
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelError}))
+	ctx := logctx.With(context.Background(), logger)
+
+	if got := output.ExitCodeFor(runAndUnenroll(ctx, testConfig(), deps)); got != 5 {
+		t.Fatalf("exit code = %d, want 5 (daemon code dominates)", got)
+	}
+
+	logs := buf.String()
+	for _, want := range []string{"host may still be enrolled", "unenroll boom"} {
+		if !strings.Contains(logs, want) {
+			t.Errorf("diagnostics %q missing %q", logs, want)
+		}
+	}
+}
+
+// dt-cr62: the converse. When the unenroll failure IS returned, it must not also
+// be logged: the error envelope carries the message, and a log record repeating
+// it duplicates envelope content (ADR 0004) as well as handling one failure twice
+// (ADR 0002).
+func TestRunAndUnenroll_ReturnedUnenrollFailureIsNotLogged(t *testing.T) {
+	rec := &recorder{}
+	ready, exit := make(chan struct{}), make(chan struct{})
+	unenrollErr := errors.New("unenroll boom")
+	deps := Deps{
+		Install:         recordingStep(rec, "install", nil),
+		Daemon:          &mockDaemon{rec: rec, ready: ready, exit: exit},
+		WaitReady:       readyWaiter(rec, ready),
+		Enroll:          enrollReleasing(rec, exit, nil),
+		Unenroll:        recordingUnenroll(rec, nil, unenrollErr),
+		UnenrollTimeout: time.Second,
+	}
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := logctx.With(context.Background(), logger)
+
+	if err := runAndUnenroll(ctx, testConfig(), deps); !errors.Is(err, unenrollErr) {
+		t.Fatalf("runAndUnenroll error = %v, want %v", err, unenrollErr)
+	}
+	if strings.Contains(buf.String(), "unenroll boom") {
+		t.Errorf("the returned error was also logged, duplicating envelope content: %q", buf.String())
+	}
+}
+
+// dt-nrq1: a signal shutdown reports the signal code and no error envelope, so an
+// unenroll failure during that shutdown has nowhere to be seen except the log —
+// design Req 5 specifies exactly that ("is logged ... but does not change the
+// signal exit code"). Returning it instead would leave a host possibly still
+// enrolled with no trace at all on stderr.
+func TestRunAndUnenroll_SignalShutdownUnenrollFailureIsLoggedNotReturned(t *testing.T) {
+	rec := &recorder{}
+	ready, enrolled := make(chan struct{}), make(chan struct{})
+	deps := Deps{
+		Install:         recordingStep(rec, "install", nil),
+		Daemon:          &mockDaemon{rec: rec, ready: ready, err: signalKilledError(t)},
+		WaitReady:       readyWaiter(rec, ready),
+		Enroll:          enrollSignalling(rec, enrolled),
+		Unenroll:        recordingUnenroll(rec, nil, errors.New("unenroll boom")),
+		UnenrollTimeout: time.Second,
+	}
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelError}))
+	ctx, cancel := context.WithCancel(logctx.With(context.Background(), logger))
+	errc := make(chan error, 1)
+	go func() { errc <- runAndUnenroll(ctx, testConfig(), deps) }()
+	<-enrolled
+	cancel()
+
+	if err := <-errc; err != nil {
+		t.Fatalf("runAndUnenroll error = %v, want nil (the signal code governs the shutdown)", err)
+	}
+
+	logs := buf.String()
+	for _, want := range []string{"host may still be enrolled", "unenroll boom"} {
+		if !strings.Contains(logs, want) {
+			t.Errorf("diagnostics %q missing %q", logs, want)
+		}
+	}
+}
+
+// dt-nrq1: the two kinds, asserted at the boundary's own predicate. A graceful
+// signal shutdown is a status and prints nothing; a daemon that exited on its own
+// is a real failure of the wrapped process and keeps its envelope, whatever status
+// N it propagates.
+func TestExitErrKindFollowsItsClass(t *testing.T) {
+	signalled := withSignalExitCode(nil, syscall.SIGTERM)
+	if !terr.IsNonFailure(signalled) {
+		t.Error("the signal shutdown is reported as a failure, want a non-failure status")
+	}
+
+	// A signal shutdown whose cleanup failed is still a status: the wrapper's kind
+	// must not be read off the failure it carries.
+	if !terr.IsNonFailure(withSignalExitCode(dnclient.ErrDNClientFailed.Wrap(errors.New("boom")), syscall.SIGINT)) {
+		t.Error("the signal wrapper lost its status marker to the error it carries")
+	}
+
+	daemon := newExitErr(ErrDaemonExit, 7, errors.New("dnclient run: exit status 7"))
+	if terr.IsNonFailure(daemon) {
+		t.Error("a daemon exit is reported as a non-failure status, want a failure")
 	}
 }

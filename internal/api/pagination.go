@@ -55,7 +55,7 @@ func (c *Client) listAll(ctx context.Context, path string, q url.Values, each fu
 			Metadata pageMetadata      `json:"metadata"`
 		}
 		if err := json.Unmarshal(rawBody, &envelope); err != nil {
-			return fmt.Errorf("decoding list envelope: %w", err)
+			return ErrAPIMalformedResponse.Wrap(fmt.Errorf("decoding list envelope: %w", err))
 		}
 
 		for _, item := range envelope.Data {

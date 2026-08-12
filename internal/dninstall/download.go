@@ -4,7 +4,6 @@ import (
 	"fmt"
 
 	"github.com/andreswebs/dn-tool/internal/api"
-	"github.com/andreswebs/dn-tool/internal/output"
 )
 
 // resolved is a dnclient binary download resolved from the downloads API: the
@@ -45,16 +44,16 @@ func resolveDownload(dl *api.Downloads, p Platform, version string) (resolved, e
 	}
 
 	// A requested version or platform with no published binary reflects a
-	// DN_CLIENT_VERSION / host mismatch: a configuration error (EX_CONFIG).
+	// DN_CLIENT_VERSION / host mismatch: ErrNoDownload (EX_CONFIG).
 	archURLs, ok := dl.DNClient[resolvedVersion]
 	if !ok {
-		return resolved{}, output.Classify(fmt.Errorf("no dnclient download for version %q", resolvedVersion), output.CodeConfig)
+		return resolved{}, ErrNoDownload.Wrap(fmt.Errorf("version %q is not in the downloads table", resolvedVersion))
 	}
 
 	key := p.downloadKey()
 	url, ok := archURLs[key]
 	if !ok {
-		return resolved{}, output.Classify(fmt.Errorf("no dnclient download for platform %q at version %q", key, resolvedVersion), output.CodeConfig)
+		return resolved{}, ErrNoDownload.Wrap(fmt.Errorf("platform %q has no binary at version %q", key, resolvedVersion))
 	}
 
 	return resolved{

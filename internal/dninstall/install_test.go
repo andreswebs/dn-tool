@@ -1,9 +1,11 @@
 package dninstall
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"log/slog"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -11,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/andreswebs/dn-tool/internal/api"
+	"github.com/andreswebs/dn-tool/internal/logctx"
 )
 
 // fakeDownloader returns a canned downloads table, standing in for *api.Client.
@@ -275,4 +278,29 @@ func TestInstall_VerifyFailureLeavesNoBinary(t *testing.T) {
 		t.Errorf("binary present after verify failure: stat err = %v", statErr)
 	}
 	assertNoTempFiles(t, binDir)
+}
+
+// dt-cr62: the install decision is the only observability into the idempotency
+// outcome, so removing slog.SetDefault must not silence it. It now travels on the
+// context.
+func TestInstall_LogsTheDecisionThroughTheContextLogger(t *testing.T) {
+	binary := []byte("already-installed dnclient")
+	deps, binDir := installFixture(t, verifyServer{binary: binary})
+	binPath := filepath.Join(binDir, binaryName)
+	writeBinaryFixture(t, binPath, string(binary))
+
+	var buf bytes.Buffer
+	logger := slog.New(slog.NewJSONHandler(&buf, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := logctx.With(context.Background(), logger)
+
+	if _, err := Install(ctx, deps, InstallOptions{BinaryPath: binPath}); err != nil {
+		t.Fatalf("Install: %v", err)
+	}
+
+	logs := buf.String()
+	for _, want := range []string{"install decision", `"needsInstall":false`, binPath} {
+		if !strings.Contains(logs, want) {
+			t.Errorf("diagnostics %q missing %q", logs, want)
+		}
+	}
 }

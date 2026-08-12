@@ -2,13 +2,13 @@ package enroll
 
 import (
 	"context"
-	"errors"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/andreswebs/dn-tool/internal/api"
 	"github.com/andreswebs/dn-tool/internal/output"
+	"github.com/andreswebs/dn-tool/internal/terr"
 )
 
 // failingAPI satisfies the API seam but fails the test if any method is called.
@@ -83,14 +83,12 @@ func TestEnrollNoOpExitSemantics(t *testing.T) {
 		t.Fatalf("no-op result must report Changed=false")
 	}
 
-	// Without --assert-changed: success, exit 0.
-	if code := output.ResolveExitCode(nil); code != output.CodeOK {
-		t.Errorf("no-op exit code = %d, want %d", code, output.CodeOK)
-	}
+	// Without --assert-changed the no-op returns no error at all (asserted above),
+	// which the exit boundary reports as CodeOK.
 
 	// With --assert-changed: a no-op yields the distinct, non-error result code.
-	assertErr := output.ExitError(errors.New("no change made"), output.CodeResult)
-	if code := output.ResolveExitCode(assertErr); code != output.CodeResult {
+	assertErr := terr.Newf("no_change", output.CodeResult, "", "no change made")
+	if code := output.ExitCodeFor(assertErr); code != output.CodeResult {
 		t.Errorf("no-op --assert-changed exit code = %d, want %d", code, output.CodeResult)
 	}
 }

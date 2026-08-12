@@ -1,6 +1,6 @@
 ---
 id: dt-o9hi
-status: open
+status: closed
 deps: [dt-w86c, dt-2efx, dt-uq9d, dt-djf3, dt-nljm, dt-3xxb, dt-cr62, dt-cjgq]
 links: []
 created: 2026-08-12T13:21:43Z
@@ -117,3 +117,19 @@ dt-nljm, dt-3xxb, dt-cr62, dt-cjgq. Blocks nothing.
 ## Do not commit
 
 Leave git commits and branching to the repo owner.
+
+## Notes
+
+**2026-08-12T15:53:28Z**
+
+Sweep findings beyond the 19 rows (both fixed here): (1) internal/output/result.go Result doc comment said 'Changed drives --assert-changed / exit 2' - same dt-7lys staleness as rows 16/17, now exit 1. (2) Two stale five-command counts now that 'schema' exists: docs/specs/e2e-testing.md Layer 1 discovery case said '--help lists exactly the five commands' (now six, verified against the real binary's COMMANDS block), and the ResultEnvelope doc comment said 'all five commands share' without noting schema uses its own SchemaEnvelope - reworded rather than renumbered, since the five-way sharing claim is still true of the result-producing commands.
+
+**2026-08-12T15:53:45Z**
+
+Done. Rows owned here: (1) design doc Req 8 and (2) CHANGELOG Unreleased both dropped 'family-wide' (substance untouched); (3) internal/output/exit.go and (17) internal/enroll/state.go were already fixed by dt-uq9d and dt-2efx respectively, verified not re-edited; (16) design doc 2.4 state-machine table no-op row now says 'Exit 0 (or 1 w/ --assert-changed)'; (18) design doc 2.9 redrawn against the real tree - dropped the '(tentative)' marker, added command/dninstall/dnstate/unenroll/run/terr/version, split dninstall (download+verify+install) from dnclient (subprocess), and restated main.go as the process entry point since command/ now owns the urfave wiring. Rows 4-15 and 19 spot-checked as landed with their owning tickets (README + design 2.2 six-command tables and --log-level/--quiet flag lines, design 2.8 envelope examples for both streams, design 2.10 TTY-adaptive handler, e2e-testing stdout/stderr contract rows).
+
+Link repair from the docs/specs move: e2e-testing.md had five broken relative links, not the one the ticket listed - ./research/ x3, ./dn-tool-design.md, and adr/0001; learnings.md had one (research/urfave-cli-reference.md). All repointed with ../. Verified by a repo-wide resolver over every relative markdown link in tracked .md files outside .tickets/ and .local/ - zero broken.
+
+The adr/0001 fix lengthened the aligned contracts table row past its neighbours and tripped MD060, so all 13 rows were repadded to 372 chars (separator row rebuilt as pure dashes). markdownlint-cli2 is clean on every touched file except MD013 line-length, which is pre-existing repo-wide noise: there is no local markdownlint config and no ~/.markdownlint.yaml in this environment, so the default 80-col rule applies and flags 100+ pre-existing lines. Ran the counts against HEAD to confirm no new MD013 came from these edits.
+
+Grep sweep clean on all seven patterns across docs/, README.md, CHANGELOG.md and Go comments. The surviving hits are all legitimate: CHANGELOG's own entries announcing '--log-text is removed' and the hostId -> host_id rename, and the design doc's 'plain text logs at a terminal' which is the ADR 0004 posture, not the old flag. make build green.

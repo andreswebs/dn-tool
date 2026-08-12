@@ -1,0 +1,1 @@
+{"schema_version":1,"ok":false,"error":{"code":"checksum_mismatch","message":"dnclient checksum mismatch: published b631e5bce50daa603bf7449fe7efb3b90cb76bd80938eb7bbf2070731b5d8dbe, computed 9542f451d66df2145d7aeafe6c782b1d717a771b7ebcd19ab4a904ff09337c1b","hint":"the download does not match its published checksum; retry, and treat a repeat as a supply-chain problem"}}
