@@ -44,7 +44,7 @@ jobs:
       # derives it from the scanned directory path (see the "no explicit name and
       # version" warning) instead of the released software's identity.
       - name: Generate SBOM
-        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610 # v0.24.0
+        uses: anchore/sbom-action@3ad7283483fc7af8ff2b4ea19663c2d5ca935e26 # v0.24.2
         env:
           SYFT_SOURCE_NAME: dn-tool
           SYFT_SOURCE_VERSION: ${{ github.ref_name }}
